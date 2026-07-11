@@ -12,9 +12,9 @@ datasource db {
 
 model User {
   id        String   @id @default(cuid())
-  email     String   @unique
   name      String?
-  password  String
+  email     String   @unique
+  image     String?
   role      String   @default("USER") // "USER" | "ADMIN"
   posts     Post[]
   createdAt DateTime @default(now())
@@ -25,11 +25,13 @@ model Post {
   id          String    @id @default(cuid())
   title       String
   slug        String    @unique
+  excerpt     String?
   content     String
-  published   Boolean   @default(false)
-  publishedAt DateTime?
-  viewCount   Int       @default(0)
+  coverImage  String?
+  status      String    @default("draft") // "draft" | "published"
   readingTime Int       @default(0) // Reading time in minutes
+  views       Int       @default(0)
+  publishedAt DateTime?
   authorId    String
   author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   categoryId  String?
@@ -40,12 +42,13 @@ model Post {
 }
 
 model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  slug      String   @unique
-  posts     Post[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  posts       Post[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model Tag {
@@ -65,4 +68,5 @@ model PostTag {
 
   @@id([postId, tagId])
 }
+
 
