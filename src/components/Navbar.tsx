@@ -4,16 +4,23 @@ import Link from "next/link";
 import { useState } from "react";
 import { Menu, X, BookOpen } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { UserMenu } from "./UserMenu";
+import { authClient } from "@/lib/auth-client";
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const { data: session } = authClient.useSession();
+  const user = session?.user;
 
   const navLinks = [
     { name: "Home", href: "/" },
     { name: "Blog", href: "/blog" },
     { name: "About", href: "/about" },
-    { name: "Admin", href: "/admin" },
   ];
+
+  if (user) {
+    navLinks.push({ name: "Admin", href: "/admin" });
+  }
 
   return (
     <nav className="sticky top-0 z-50 w-full border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-black/80 backdrop-blur-md transition-colors">
@@ -40,17 +47,23 @@ export function Navbar() {
             ))}
             <span className="w-px h-5 bg-zinc-200 dark:bg-zinc-800" />
             <ThemeToggle />
-            <Link
-              href="/login"
-              className="text-sm font-medium px-4 py-2 rounded-full bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
-            >
-              Login
-            </Link>
+            
+            {user ? (
+              <UserMenu user={user} />
+            ) : (
+              <Link
+                href="/login"
+                className="text-sm font-medium px-4 py-2 rounded-full bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+              >
+                Login
+              </Link>
+            )}
           </div>
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-4">
             <ThemeToggle />
+            {user && <UserMenu user={user} />}
             <button
               onClick={() => setIsOpen(!isOpen)}
               className="p-2 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 focus:outline-none"
@@ -75,15 +88,17 @@ export function Navbar() {
               {link.name}
             </Link>
           ))}
-          <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-            <Link
-              href="/login"
-              onClick={() => setIsOpen(false)}
-              className="flex justify-center w-full text-center text-sm font-medium px-4 py-2.5 rounded-full bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
-            >
-              Login
-            </Link>
-          </div>
+          {!user && (
+            <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
+              <Link
+                href="/login"
+                onClick={() => setIsOpen(false)}
+                className="flex justify-center w-full text-center text-sm font-medium px-4 py-2.5 rounded-full bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors"
+              >
+                Login
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </nav>

@@ -4,10 +4,10 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
-import { LoginForm } from "@/components/LoginForm";
+import { RegisterForm } from "@/components/RegisterForm";
 import { authClient } from "@/lib/auth-client";
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const router = useRouter();
   const { data: session, isPending } = authClient.useSession();
 
@@ -34,14 +34,14 @@ export default function LoginPage() {
           <BookOpen className="w-6 h-6 text-zinc-50 dark:text-zinc-900" />
         </Link>
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-          Welcome back
+          Create an account
         </h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Sign in to manage your LogBook blog
+          Get started with LogBook blogging platform
         </p>
       </div>
 
-      <LoginForm />
+      <RegisterForm />
     </div>
   );
 }
