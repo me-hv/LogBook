@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Mail, Lock, User, AlertCircle, ArrowRight, Shield } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, ArrowRight } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
 export function RegisterForm() {
@@ -11,7 +11,6 @@ export function RegisterForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState("author"); // default role
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +24,6 @@ export function RegisterForm() {
         email,
         password,
         name,
-        role, // Passed as additional user input since role.input = true in server config
         callbackURL: "/admin",
       }, {
         onRequest: () => {
@@ -115,26 +113,6 @@ export function RegisterForm() {
               placeholder="••••••••"
               className="block w-full pl-10 pr-4 py-2.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-zinc-900 dark:focus:border-zinc-100 transition-all"
             />
-          </div>
-        </div>
-
-        {/* Role */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-semibold text-zinc-550 dark:text-zinc-400">
-            Role Selection
-          </label>
-          <div className="relative">
-            <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400">
-              <Shield className="w-4.5 h-4.5" />
-            </span>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              className="block w-full pl-10 pr-4 py-2.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-zinc-900 dark:focus:border-zinc-100 transition-all appearance-none"
-            >
-              <option value="author">Author (Create & Manage Own Content)</option>
-              <option value="admin">Administrator (Full Access)</option>
-            </select>
           </div>
         </div>
 
