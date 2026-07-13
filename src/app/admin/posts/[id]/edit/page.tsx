@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { PostForm } from "../../PostForm";
+import { PostEditor } from "@/components/PostEditor";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -40,5 +40,5 @@ export default async function EditPostPage({ params }: PageProps) {
     tagIds: post.tags.map((t) => t.tagId),
   };
 
-  return <PostForm categories={categories} tags={tags} initialPost={serializedPost} />;
+  return <PostEditor categories={categories} tags={tags} initialPost={serializedPost} />;
 }

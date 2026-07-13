@@ -40,7 +40,7 @@ export function PostCard({ post }: PostCardProps) {
 
       {/* Title */}
       <h3 className="text-xl font-bold text-zinc-900 dark:text-zinc-50 mb-2 line-clamp-2 group-hover:text-zinc-800 dark:group-hover:text-zinc-200 transition-colors">
-        <Link href={`/posts/${post.slug}`}>{post.title}</Link>
+        <Link href={`/blog/${post.slug}`}>{post.title}</Link>
       </h3>
 
       {/* Excerpt */}
@@ -69,7 +69,7 @@ export function PostCard({ post }: PostCardProps) {
       
       {/* Read More Link */}
       <Link
-        href={`/posts/${post.slug}`}
+        href={`/blog/${post.slug}`}
         className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-zinc-900 dark:text-zinc-50 hover:gap-1.5 transition-all self-start"
       >
         <span>Read article</span>

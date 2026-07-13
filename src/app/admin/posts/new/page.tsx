@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { PostForm } from "../PostForm";
+import { PostEditor } from "@/components/PostEditor";
 
 export default async function NewPostPage() {
   const [categories, tags] = await Promise.all([
@@ -7,5 +7,5 @@ export default async function NewPostPage() {
     prisma.tag.findMany({ orderBy: { name: "asc" } }),
   ]);
 
-  return <PostForm categories={categories} tags={tags} />;
+  return <PostEditor categories={categories} tags={tags} />;
 }

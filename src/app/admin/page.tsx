@@ -108,7 +108,7 @@ export default async function AdminDashboard() {
                 </td>
                 <td className="px-6 py-4 text-right">
                   <Link
-                    href={`/admin/posts?edit=${post.id}`}
+                    href={`/admin/posts/${post.id}/edit`}
                     className="text-sm font-semibold text-zinc-900 dark:text-zinc-50 hover:underline"
                   >
                     Edit

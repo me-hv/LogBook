@@ -30,7 +30,7 @@ We hope you find this template useful. Happy coding!
     `,
     published: true,
     publishedAt: "2026-07-10T12:00:00Z",
-    viewCount: 342,
+    views: 342,
     readingTime: 4,
     author: {
       id: "author-1",
@@ -88,7 +88,7 @@ Try configuring your project today!
     `,
     published: true,
     publishedAt: "2026-07-08T09:30:00Z",
-    viewCount: 215,
+    views: 215,
     readingTime: 3,
     author: {
       id: "author-1",
@@ -140,7 +140,7 @@ Write your next post in Markdown!
     `,
     published: true,
     publishedAt: "2026-07-05T14:15:00Z",
-    viewCount: 189,
+    views: 189,
     readingTime: 5,
     author: {
       id: "author-2",

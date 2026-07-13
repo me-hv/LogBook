@@ -22,8 +22,10 @@ export interface Post {
   slug: string;
   content: string;
   published: boolean;
+  excerpt?: string | null;
+  coverImage?: string | null;
   publishedAt: string | null;
-  viewCount: number;
+  views: number;
   readingTime: number;
   author: Author;
   category: Category | null;

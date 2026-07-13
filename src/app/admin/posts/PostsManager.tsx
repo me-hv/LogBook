@@ -140,7 +140,7 @@ export function PostsManager({ initialPosts }: PostsManagerProps) {
                     <Eye className="w-4.5 h-4.5" />
                   </Link>
                   <Link
-                    href={`/admin/posts/edit/${post.id}`}
+                    href={`/admin/posts/${post.id}/edit`}
                     className="p-1.5 rounded-lg text-zinc-550 dark:text-zinc-450 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all"
                     title="Edit post"
                   >
