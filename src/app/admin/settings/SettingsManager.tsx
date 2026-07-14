@@ -12,6 +12,8 @@ interface SettingsData {
     github: string;
     twitter: string;
   };
+  discordWebhookUrl?: string;
+  slackWebhookUrl?: string;
 }
 
 interface SettingsManagerProps {
@@ -40,6 +42,8 @@ export function SettingsManager({ initialSettings }: SettingsManagerProps) {
         github,
         twitter,
       },
+      discordWebhookUrl: initialSettings.discordWebhookUrl || "",
+      slackWebhookUrl: initialSettings.slackWebhookUrl || "",
     };
 
     try {

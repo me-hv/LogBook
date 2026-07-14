@@ -15,6 +15,9 @@ import {
   Mail,
   Users,
   MessageSquare,
+  UserCheck,
+  Code,
+  Puzzle,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
@@ -83,7 +86,7 @@ export function AdminSidebar() {
     {
       name: "Subscribers",
       href: "/admin/subscribers",
-      icon: <Users className="w-4 h-4" />,
+      icon: <UserCheck className="w-4 h-4" />,
       active: pathname.startsWith("/admin/subscribers"),
     },
     {
@@ -91,6 +94,24 @@ export function AdminSidebar() {
       href: "/admin/comments",
       icon: <MessageSquare className="w-4 h-4" />,
       active: pathname.startsWith("/admin/comments"),
+    },
+    {
+      name: "Team Collaboration",
+      href: "/admin/users",
+      icon: <Users className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/users"),
+    },
+    {
+      name: "Developers",
+      href: "/admin/developers",
+      icon: <Code className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/developers"),
+    },
+    {
+      name: "Plugins",
+      href: "/admin/plugins",
+      icon: <Puzzle className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/plugins"),
     },
     {
       name: "Settings",

@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { Edit3, Eye, FileText, Image as ImageIcon } from "lucide-react";
+import { Edit3, Eye, FileText, Image as ImageIcon, Sparkles } from "lucide-react";
 import { MarkdownPreview } from "./MarkdownPreview";
 import { MediaSelector } from "./MediaSelector";
+import { AICommandPalette } from "./AICommandPalette";
 
 interface MarkdownEditorProps {
   value: string;
@@ -14,11 +15,39 @@ interface MarkdownEditorProps {
 export function MarkdownEditor({ value, onChange, placeholder }: MarkdownEditorProps) {
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
   const [showImageSelector, setShowImageSelector] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Word and character counts
   const charCount = value.length;
   const wordCount = value.trim().split(/\s+/).filter((w) => w.length > 0).length;
+
+  const getSelectedText = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return "";
+    return value.substring(textarea.selectionStart, textarea.selectionEnd);
+  };
+
+  const handleInsertAIResult = (resultText: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      onChange(value + (value ? "\n" : "") + resultText);
+      return;
+    }
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = value.substring(0, start);
+    const after = value.substring(end);
+
+    onChange(before + resultText + after);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.selectionStart = start + resultText.length;
+      textarea.selectionEnd = start + resultText.length;
+    }, 50);
+  };
 
   const handleInsertImage = (url: string, filename: string) => {
     const textarea = textareaRef.current;
@@ -78,15 +107,27 @@ export function MarkdownEditor({ value, onChange, placeholder }: MarkdownEditorP
 
           {/* Insert Image Button */}
           {activeTab === "edit" && (
-            <button
-              type="button"
-              onClick={() => setShowImageSelector(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-955 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
-              title="Insert Image from Media Library"
-            >
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Insert Image</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowImageSelector(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-zinc-550 dark:text-zinc-400 hover:text-zinc-955 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Insert Image from Media Library"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Insert Image</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPalette(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-zinc-550 dark:text-zinc-450 hover:text-zinc-955 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer"
+                title="Open AI Command Palette"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-zinc-900 dark:text-zinc-100" />
+                <span>AI Copilot</span>
+              </button>
+            </>
           )}
         </div>
 
@@ -155,6 +196,14 @@ export function MarkdownEditor({ value, onChange, placeholder }: MarkdownEditorP
           title="Insert Blog Image"
         />
       )}
+
+      {/* AI Command Palette Modal */}
+      <AICommandPalette
+        isOpen={showPalette}
+        onClose={() => setShowPalette(false)}
+        selectedText={getSelectedText()}
+        onInsertResult={handleInsertAIResult}
+      />
     </div>
   );
 }

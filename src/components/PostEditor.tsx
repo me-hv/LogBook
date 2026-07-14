@@ -10,6 +10,13 @@ import { MarkdownEditor } from "./MarkdownEditor";
 import { calculateReadingTime } from "./ReadingTime";
 import { MediaSelector } from "./MediaSelector";
 import { createPost, updatePost } from "@/app/admin/actions";
+import { RevisionViewer } from "./RevisionViewer";
+import { EditorialNotes } from "./EditorialNotes";
+import { SEOScoreCard } from "./SEOScoreCard";
+import { TagSuggestions } from "./TagSuggestions";
+import { WritingInsights } from "./WritingInsights";
+import { AIAssistantPanel } from "./AIAssistantPanel";
+import { InternalLinkSuggestions } from "./InternalLinkSuggestions";
 
 interface Category {
   id: string;
@@ -55,6 +62,7 @@ export function PostEditor({ categories, tags, initialPost }: PostEditorProps) {
   const [error, setError] = useState("");
   const [saveIndicator, setSaveIndicator] = useState("");
   const [showCoverSelector, setShowCoverSelector] = useState(false);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<"settings" | "ai">("settings");
 
   // Auto-generate slug from title
   const handleTitleChange = (val: string) => {
@@ -279,111 +287,193 @@ export function PostEditor({ categories, tags, initialPost }: PostEditorProps) {
 
         {/* Right Column: Side Settings Panel */}
         <div className="space-y-6">
-          {/* General Metadata Card */}
-          <div className="bg-white dark:bg-zinc-950/40 p-6 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4 shadow-sm">
-            <div className="flex items-center gap-1.5 border-b border-zinc-150 dark:border-zinc-900 pb-3">
-              <Sparkles className="w-4.5 h-4.5 text-zinc-400" />
-              <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Metadata</h3>
-            </div>
+          {/* Sidebar Tab Header */}
+          <div className="flex gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+            <button
+              type="button"
+              onClick={() => setActiveSidebarTab("settings")}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeSidebarTab === "settings"
+                  ? "bg-zinc-900 dark:bg-zinc-550 text-zinc-50 dark:text-zinc-900"
+                  : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              }`}
+            >
+              Settings & Notes
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSidebarTab("ai")}
+              className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeSidebarTab === "ai"
+                  ? "bg-zinc-900 dark:bg-zinc-550 text-zinc-50 dark:text-zinc-900"
+                  : "text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-900"
+              }`}
+            >
+              AI Co-pilot & SEO
+            </button>
+          </div>
 
-            {/* Slug */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
-                Slug
-              </label>
-              <input
-                type="text"
-                required
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                placeholder="url-slug"
-                className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all font-mono"
-              />
-            </div>
+          {activeSidebarTab === "settings" ? (
+            <>
+              {/* General Metadata Card */}
+              <div className="bg-white dark:bg-zinc-950/40 p-6 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4 shadow-sm">
+                <div className="flex items-center gap-1.5 border-b border-zinc-150 dark:border-zinc-900 pb-3">
+                  <Sparkles className="w-4.5 h-4.5 text-zinc-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-50">Metadata</h3>
+                </div>
 
-            {/* Excerpt */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
-                Excerpt
-              </label>
-              <textarea
-                value={excerpt}
-                onChange={(e) => setExcerpt(e.target.value)}
-                placeholder="Short summary..."
-                rows={3}
-                className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all resize-none"
-              />
-            </div>
+                {/* Slug */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
+                    Slug
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={slug}
+                    onChange={(e) => setSlug(e.target.value)}
+                    placeholder="url-slug"
+                    className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all font-mono"
+                  />
+                </div>
 
-            {/* Cover Image */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
-                Cover Image URL
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={coverImage}
-                  onChange={(e) => setCoverImage(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all flex-grow"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowCoverSelector(true)}
-                  className="px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center justify-center"
-                  title="Choose from Media Library"
-                >
-                  <ImageIcon className="w-4 h-4" />
-                </button>
+                {/* Excerpt */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
+                    Excerpt
+                  </label>
+                  <textarea
+                    value={excerpt}
+                    onChange={(e) => setExcerpt(e.target.value)}
+                    placeholder="Short summary..."
+                    rows={3}
+                    className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all resize-none"
+                  />
+                </div>
+
+                {/* Cover Image */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
+                    Cover Image URL
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={coverImage}
+                      onChange={(e) => setCoverImage(e.target.value)}
+                      placeholder="https://images.unsplash.com/..."
+                      className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all flex-grow"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCoverSelector(true)}
+                      className="px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center justify-center"
+                      title="Choose from Media Library"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
 
-          {/* Cover Media Selector Modal */}
-          {showCoverSelector && (
-            <MediaSelector
-              onClose={() => setShowCoverSelector(false)}
-              onSelect={(url) => setCoverImage(url)}
-              title="Select Cover Image"
-            />
+              {/* Cover Media Selector Modal */}
+              {showCoverSelector && (
+                <MediaSelector
+                  onClose={() => setShowCoverSelector(false)}
+                  onSelect={(url) => setCoverImage(url)}
+                  title="Select Cover Image"
+                />
+              )}
+
+              {/* Publishing taxonomy card */}
+              <div className="bg-white dark:bg-zinc-950/40 p-6 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4 shadow-sm">
+                <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
+                  Publishing Options
+                </h3>
+
+                {/* Status Select */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider block">
+                    Status
+                  </label>
+                  <select
+                    value={status}
+                    onChange={(e) => setStatus(e.target.value)}
+                    className="block w-full px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-455 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 appearance-none cursor-pointer"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="in_review">In Review</option>
+                    <option value="approved">Approved</option>
+                    <option value="scheduled">Scheduled</option>
+                    <option value="published">Published</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </div>
+
+                {/* Category Select */}
+                <CategorySelector
+                  categories={categories}
+                  value={categoryId}
+                  onChange={setCategoryId}
+                />
+
+                {/* Tag Selector */}
+                <TagSelector
+                  tags={tags}
+                  selectedTags={selectedTags}
+                  onChange={setSelectedTags}
+                />
+              </div>
+
+              {/* Editorial Notes & Revision snap widgets (Only for existing posts) */}
+              {initialPost && (
+                <div className="space-y-6">
+                  <EditorialNotes postId={initialPost.id} />
+                  <RevisionViewer
+                    postId={initialPost.id}
+                    currentTitle={title}
+                    currentContent={content}
+                    onRestore={() => window.location.reload()}
+                  />
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-6 animate-in fade-in duration-200">
+              <AIAssistantPanel
+                content={content}
+                onInsertText={(txt) => setContent(content + (content ? "\n\n" : "") + txt)}
+                onApplyExcerpt={setExcerpt}
+              />
+              <SEOScoreCard
+                title={title}
+                content={content}
+                onApplyTitle={setTitle}
+                onApplyMeta={setExcerpt}
+              />
+              <TagSuggestions
+                content={content}
+                onApplyCategory={(name) => {
+                  const match = categories.find(c => c.name.toLowerCase() === name.toLowerCase());
+                  if (match) setCategoryId(match.id);
+                }}
+                onApplyTag={(name) => {
+                  const match = tags.find(t => t.name.toLowerCase() === name.toLowerCase());
+                  if (match && !selectedTags.includes(match.id)) {
+                    setSelectedTags([...selectedTags, match.id]);
+                  }
+                }}
+              />
+              <WritingInsights content={content} />
+              <InternalLinkSuggestions
+                postId={initialPost?.id}
+                content={content}
+                onInsertLink={(lTitle, lSlug) => {
+                  setContent(content + (content ? "\n\n" : "") + `[${lTitle}](/blog/${lSlug})`);
+                }}
+              />
+            </div>
           )}
-
-          {/* Publishing taxonomy card */}
-          <div className="bg-white dark:bg-zinc-950/40 p-6 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4 shadow-sm">
-            <h3 className="text-xs font-bold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
-              Publishing Options
-            </h3>
-
-            {/* Status Select */}
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider block">
-                Status
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value)}
-                className="block w-full px-3 py-2 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-450 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 appearance-none cursor-pointer"
-              >
-                <option value="draft">Draft</option>
-                <option value="published">Published</option>
-              </select>
-            </div>
-
-            {/* Category Select */}
-            <CategorySelector
-              categories={categories}
-              value={categoryId}
-              onChange={setCategoryId}
-            />
-
-            {/* Tag Selector */}
-            <TagSelector
-              tags={tags}
-              selectedTags={selectedTags}
-              onChange={setSelectedTags}
-            />
-          </div>
         </div>
       </div>
     </div>

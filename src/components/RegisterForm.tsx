@@ -1,18 +1,38 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Mail, Lock, User, AlertCircle, ArrowRight } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { validateInvitationToken, consumeInvitationTokenAction } from "@/app/admin/actions";
 
 export function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const token = searchParams.get("token");
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInviteOnly, setIsInviteOnly] = useState(false);
+
+  useEffect(() => {
+    if (token) {
+      setLoading(true);
+      validateInvitationToken(token).then((res) => {
+        if (res.success && res.data) {
+          setEmail(res.data.email);
+          setIsInviteOnly(true);
+        } else {
+          setError(res.error || "Invalid or expired invitation token.");
+        }
+        setLoading(false);
+      });
+    }
+  }, [token]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +49,10 @@ export function RegisterForm() {
         onRequest: () => {
           setLoading(true);
         },
-        onSuccess: () => {
+        onSuccess: async () => {
+          if (token && isInviteOnly) {
+            await consumeInvitationTokenAction(email, token);
+          }
           router.push("/admin");
           router.refresh();
         },
@@ -90,8 +113,9 @@ export function RegisterForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              disabled={isInviteOnly || loading}
               placeholder="you@example.com"
-              className="block w-full pl-10 pr-4 py-2.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-zinc-900 dark:focus:border-zinc-100 transition-all"
+              className="block w-full pl-10 pr-4 py-2.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 focus:border-zinc-900 dark:focus:border-zinc-100 transition-all disabled:opacity-60"
             />
           </div>
         </div>

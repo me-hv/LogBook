@@ -8,6 +8,11 @@ import fs from "fs";
 import path from "path";
 import { supabaseAdmin, ensureBucketExists } from "@/lib/supabase";
 import { sendWelcomeEmail, sendNewPostNotification, sendAnnouncementEmail } from "@/services/emails";
+import { randomUUID, createHash } from "crypto";
+import { resend } from "@/lib/resend";
+import { dispatchWebhookEvent, dispatchThirdPartyAnnouncements } from "@/lib/webhooks";
+import { PLUGINS_REGISTRY } from "@/lib/plugins-registry";
+import { triggerPluginHook } from "@/lib/plugin-hooks";
 
 // Helper path for settings
 const settingsFilePath = path.join(process.cwd(), "src/lib/settings.json");
@@ -20,6 +25,8 @@ const defaultSettings = {
     github: "https://github.com",
     twitter: "https://twitter.com",
   },
+  discordWebhookUrl: "",
+  slackWebhookUrl: "",
 };
 
 // Settings Actions
@@ -103,6 +110,33 @@ export async function createPost(data: {
       });
     }
 
+    // Save initial post revision snapshot
+    await prisma.postRevision.create({
+      data: {
+        postId: post.id,
+        title: post.title,
+        content: post.content,
+        editorId: session.user.id,
+      },
+    });
+
+    // Log creation activity
+    await prisma.activityLog.create({
+      data: {
+        action: "post_created",
+        userId: session.user.id,
+        details: `Created new article: "${post.title}"`,
+      },
+    });
+
+    // Dispatch webhook event
+    dispatchWebhookEvent("post.created", post);
+    if (post.status === "published") {
+      dispatchWebhookEvent("post.published", post);
+      dispatchThirdPartyAnnouncements(post);
+      triggerPluginHook("post.published", post);
+    }
+
     // Trigger newsletter email notification if post is published
     if (post.status === "published") {
       prisma.subscriber.findMany({
@@ -178,6 +212,33 @@ export async function updatePost(
           tagId,
         })),
       });
+    }
+
+    // Save snapshot revision
+    await prisma.postRevision.create({
+      data: {
+        postId: id,
+        title: post.title,
+        content: post.content,
+        editorId: session.user.id,
+      },
+    });
+
+    // Log editing activity
+    await prisma.activityLog.create({
+      data: {
+        action: "post_edited",
+        userId: session.user.id,
+        details: `Edited article details: "${post.title}"`,
+      },
+    });
+
+    // Dispatch webhook events
+    dispatchWebhookEvent("post.updated", post);
+    if (oldPost && oldPost.status !== "published" && post.status === "published") {
+      dispatchWebhookEvent("post.published", post);
+      dispatchThirdPartyAnnouncements(post);
+      triggerPluginHook("post.published", post);
     }
 
     // Trigger newsletter email notification if post was draft and is now published
@@ -741,6 +802,9 @@ export async function subscribeAction(email: string, source: string = "unknown")
       
       // Trigger welcome in background
       sendWelcomeEmail(updated.email, updated.unsubscribeToken).catch(err => console.error(err));
+      // Dispatch webhook event
+      dispatchWebhookEvent("subscriber.created", updated);
+      triggerPluginHook("subscriber.created", updated);
       return { success: true, message: "Welcome back! Subscription re-activated." };
     }
 
@@ -754,6 +818,9 @@ export async function subscribeAction(email: string, source: string = "unknown")
     });
 
     sendWelcomeEmail(sub.email, sub.unsubscribeToken).catch(err => console.error(err));
+    // Dispatch webhook event
+    dispatchWebhookEvent("subscriber.created", sub);
+    triggerPluginHook("subscriber.created", sub);
     return { success: true, message: "Thank you for subscribing! Check your inbox." };
   } catch (error: any) {
     return { success: false, error: error.message };
@@ -1036,6 +1103,9 @@ export async function createComment(postId: string, content: string, parentId?: 
         });
       }
     }
+
+    // Dispatch webhook event
+    dispatchWebhookEvent("comment.created", comment);
 
     return { success: true, comment };
   } catch (error: any) {
@@ -1405,6 +1475,1330 @@ export async function markAllNotificationsAsRead() {
       where: { userId, read: false },
       data: { read: true },
     });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN action: List all users.
+ */
+export async function getUsersList(search: string = "") {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const role = session.user.role;
+    if (role !== "admin" && role !== "superadmin") {
+      throw new Error("Unauthorized access");
+    }
+
+    const users = await prisma.user.findMany({
+      where: search
+        ? {
+            OR: [
+              { name: { contains: search, mode: "insensitive" } },
+              { email: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {},
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: users.map((u) => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        status: u.status,
+        createdAt: u.createdAt.toISOString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN action: Update a user's role.
+ */
+export async function updateUserRole(userId: string, targetRole: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const currentRole = session.user.role;
+    if (currentRole !== "admin" && currentRole !== "superadmin") {
+      throw new Error("Unauthorized access");
+    }
+
+    if (targetRole === "superadmin" && currentRole !== "superadmin") {
+      throw new Error("Only Super Admins can assign other Super Admins.");
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (targetUser?.role === "superadmin" && currentRole !== "superadmin") {
+      throw new Error("Only Super Admins can modify other Super Admins.");
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { role: targetRole },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "role_changed",
+        userId: session.user.id,
+        details: `Changed role of user ${updated.email} to ${targetRole}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN action: Toggle user suspension.
+ */
+export async function toggleUserSuspension(userId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const currentRole = session.user.role;
+    if (currentRole !== "admin" && currentRole !== "superadmin") {
+      throw new Error("Unauthorized access");
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!targetUser) throw new Error("User not found.");
+
+    if (targetUser.role === "superadmin" && currentRole !== "superadmin") {
+      throw new Error("Only Super Admins can suspend other Super Admins.");
+    }
+
+    const nextStatus = targetUser.status === "suspended" ? "active" : "suspended";
+    await prisma.user.update({
+      where: { id: userId },
+      data: { status: nextStatus },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "user_status_changed",
+        userId: session.user.id,
+        details: `${nextStatus === "suspended" ? "Suspended" : "Re-activated"} user ${targetUser.email}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN action: Delete a user record.
+ */
+export async function deleteUserAction(userId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const currentRole = session.user.role;
+    if (currentRole !== "admin" && currentRole !== "superadmin") {
+      throw new Error("Unauthorized access");
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!targetUser) throw new Error("User not found.");
+
+    if (targetUser.role === "superadmin" && currentRole !== "superadmin") {
+      throw new Error("Only Super Admins can delete other Super Admins.");
+    }
+
+    await prisma.user.delete({ where: { id: userId } });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "user_deleted",
+        userId: session.user.id,
+        details: `Deleted user account: ${targetUser.email}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN action: Invite a user by email.
+ */
+export async function inviteUserAction(email: string, role: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const currentRole = session.user.role;
+    if (currentRole !== "admin" && currentRole !== "superadmin") {
+      throw new Error("Unauthorized access");
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    
+    const userExists = await prisma.user.findUnique({ where: { email: cleanEmail } });
+    if (userExists) {
+      throw new Error("A user with this email address already exists.");
+    }
+
+    const token = randomUUID();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days expiry
+
+    await prisma.invitation.upsert({
+      where: { email: cleanEmail },
+      update: { role, token, expiresAt, createdAt: new Date() },
+      create: { email: cleanEmail, role, token, expiresAt },
+    });
+
+    const inviteUrl = `${process.env.BETTER_AUTH_URL || "http://localhost:3000"}/register?token=${token}`;
+    const emailFrom = process.env.EMAIL_FROM || "onboarding@resend.dev";
+    
+    await resend.emails.send({
+      from: emailFrom,
+      to: cleanEmail,
+      subject: "You have been invited to collaborate on LogBook",
+      html: `
+        <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #e4e4e7; border-radius: 12px; padding: 24px;">
+          <h2 style="margin-top: 0;">Collaborate on LogBook</h2>
+          <p>You have been invited to join the team as an <strong>${role}</strong>.</p>
+          <p>Click the link below to accept your invite and set up your account profile:</p>
+          <p><a href="${inviteUrl}" style="display: inline-block; background: #18181b; color: white; padding: 10px 20px; text-decoration: none; border-radius: 8px; font-weight: bold;">Accept Invitation</a></p>
+          <p style="font-size: 11px; color: #71717a; margin-top: 24px;">This invitation will expire in 7 days.</p>
+        </div>
+      `,
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "user_invited",
+        userId: session.user.id,
+        details: `Invited ${cleanEmail} as ${role}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * PUBLIC action: Validate registration invitation token.
+ */
+export async function validateInvitationToken(token: string) {
+  try {
+    const invite = await prisma.invitation.findUnique({
+      where: { token },
+    });
+
+    if (!invite) {
+      return { success: false, error: "Invalid or expired invitation token." };
+    }
+
+    if (new Date() > invite.expiresAt) {
+      return { success: false, error: "This invitation link has expired." };
+    }
+
+    return { success: true, data: { email: invite.email, role: invite.role } };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Editorial Workflow Actions
+ */
+export async function submitPostForReview(postId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) throw new Error("Post not found");
+
+    if (post.authorId !== session.user.id && session.user.role !== "admin" && session.user.role !== "superadmin") {
+      throw new Error("You do not have permission to submit this post.");
+    }
+
+    await prisma.post.update({
+      where: { id: postId },
+      data: { status: "in_review" },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "post_submitted_for_review",
+        userId: session.user.id,
+        details: `Submitted post "${post.title}" for editorial review.`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function approvePostAction(postId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    const role = session.user.role;
+
+    if (role !== "editor" && role !== "admin" && role !== "superadmin") {
+      throw new Error("Only editors and admins can approve drafts.");
+    }
+
+    const post = await prisma.post.update({
+      where: { id: postId },
+      data: { status: "approved", reviewerId: session.user.id },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "post_approved",
+        userId: session.user.id,
+        details: `Approved post: "${post.title}"`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function publishPostAction(postId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    const role = session.user.role;
+
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) throw new Error("Post not found");
+
+    const isAuthor = post.authorId === session.user.id;
+    const isContributor = role === "contributor";
+    const canPublish = !isContributor && (role === "admin" || role === "superadmin" || role === "editor" || (role === "author" && isAuthor));
+
+    if (!canPublish) {
+      throw new Error("You do not have permission to publish this post.");
+    }
+
+    const updated = await prisma.post.update({
+      where: { id: postId },
+      data: { status: "published", publishedAt: new Date(), publisherId: session.user.id },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "post_published",
+        userId: session.user.id,
+        details: `Published post: "${updated.title}"`,
+      },
+    });
+
+    // Dispatch webhook event
+    dispatchWebhookEvent("post.published", updated);
+    dispatchThirdPartyAnnouncements(updated);
+    triggerPluginHook("post.published", updated);
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function schedulePostAction(postId: string, scheduledAt: Date) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    const role = session.user.role;
+
+    if (role !== "editor" && role !== "admin" && role !== "superadmin") {
+      throw new Error("Only editors and admins can schedule posts.");
+    }
+
+    const post = await prisma.post.update({
+      where: { id: postId },
+      data: { status: "scheduled", scheduledAt },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "post_scheduled",
+        userId: session.user.id,
+        details: `Scheduled post "${post.title}" for ${new Date(scheduledAt).toLocaleString()}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Editorial Notes Actions
+ */
+export async function getEditorialNotes(postId: string) {
+  try {
+    const notes = await prisma.editorialNote.findMany({
+      where: { postId },
+      include: {
+        author: { select: { name: true, image: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: notes.map((n) => ({
+        id: n.id,
+        content: n.content,
+        createdAt: n.createdAt.toISOString(),
+        author: n.author,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function createEditorialNote(postId: string, content: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    const role = session.user.role;
+
+    if (role !== "editor" && role !== "admin" && role !== "superadmin") {
+      throw new Error("Only editors and admins can leave editorial notes.");
+    }
+
+    const note = await prisma.editorialNote.create({
+      data: {
+        postId,
+        content: content.trim(),
+        authorId: session.user.id,
+      },
+    });
+
+    return { success: true, note };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Version History Revisions Actions
+ */
+export async function getPostRevisions(postId: string) {
+  try {
+    const revisions = await prisma.postRevision.findMany({
+      where: { postId },
+      include: {
+        editor: { select: { name: true, image: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: revisions.map((r) => ({
+        id: r.id,
+        title: r.title,
+        content: r.content,
+        createdAt: r.createdAt.toISOString(),
+        editor: r.editor,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function savePostRevision(postId: string, title: string, content: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const revision = await prisma.postRevision.create({
+      data: {
+        postId,
+        title,
+        content,
+        editorId: session.user.id,
+      },
+    });
+
+    return { success: true, revisionId: revision.id };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function restorePostRevision(postId: string, revisionId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const revision = await prisma.postRevision.findUnique({
+      where: { id: revisionId },
+    });
+
+    if (!revision || revision.postId !== postId) {
+      throw new Error("Revision not found.");
+    }
+
+    const post = await prisma.post.update({
+      where: { id: postId },
+      data: {
+        title: revision.title,
+        content: revision.content,
+        lastEditorId: session.user.id,
+      },
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "post_revision_restored",
+        userId: session.user.id,
+        details: `Restored version from ${new Date(revision.createdAt).toLocaleString()} for "${post.title}"`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Activity timeline logs
+ */
+export async function getActivityLogs(limit: number = 10) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const logs = await prisma.activityLog.findMany({
+      include: {
+        user: { select: { name: true, image: true, email: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    });
+
+    return {
+      success: true,
+      data: logs.map((l) => ({
+        id: l.id,
+        action: l.action,
+        details: l.details,
+        createdAt: l.createdAt.toISOString(),
+        user: l.user,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Collaboration dashboard widget data
+ */
+export async function getCollaborationWidgetsData() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const [inReviewCount, scheduledCount, pendingInvites, activityData] = await Promise.all([
+      prisma.post.count({ where: { status: "in_review" } }),
+      prisma.post.count({ where: { status: "scheduled" } }),
+      prisma.invitation.count({ where: { expiresAt: { gt: new Date() } } }),
+      prisma.activityLog.findMany({
+        include: { user: { select: { name: true, image: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        inReviewCount,
+        scheduledCount,
+        pendingInvites,
+        recentActivity: activityData.map((l) => ({
+          id: l.id,
+          action: l.action,
+          details: l.details,
+          createdAt: l.createdAt.toISOString(),
+          user: l.user,
+        })),
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * PUBLIC action: Consume invitation token after successful Better Auth registration.
+ */
+export async function consumeInvitationTokenAction(email: string, token: string) {
+  try {
+    const invite = await prisma.invitation.findUnique({ where: { token } });
+    if (!invite || invite.email.toLowerCase() !== email.toLowerCase()) {
+      throw new Error("Invalid invitation token correlation.");
+    }
+
+    if (new Date() > invite.expiresAt) {
+      throw new Error("This invitation has expired.");
+    }
+
+    // Find the newly registered user and update their role
+    const user = await prisma.user.findUnique({
+      where: { email: invite.email },
+    });
+
+    if (user) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { role: invite.role },
+      });
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          action: "user_joined",
+          userId: user.id,
+          details: `Accepted team invitation as ${invite.role}`,
+        },
+      });
+    }
+
+    // Delete the invitation
+    await prisma.invitation.delete({ where: { id: invite.id } });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * MOCK fallback AI responses when GEMINI_API_KEY is not defined.
+ */
+function getMockAIResponse(type: string, input: string, tone?: string) {
+  if (type === "outline") {
+    return `### Article Outline Suggestions\n\n- **Introduction**\n  - Hook: Why this topic matters today\n  - Core thesis statement\n- **Key Pillars**\n  - Detailed breakdown of sub-concept 1\n  - Case studies and real-world examples\n- **Actionable Takeaways**\n  - Implementation checklists\n  - Common pitfalls to avoid\n- **Conclusion**\n  - Summary of insights\n  - Future trends to watch`;
+  }
+  if (type === "expand") {
+    return `In analyzing the current landscape, it becomes increasingly clear that modern web applications demand exceptional performance alongside clean user interfaces. By structuring components cleanly and minimizing direct server roundtrips, development teams can build scalable applications that deliver both robust features and responsiveness. Ultimately, this approach translates directly to higher retention rates and greater user engagement.`;
+  }
+  if (type === "rewrite") {
+    return `Here is a refined version of your text written in a ${tone || "professional"} tone:\n\n"We are excited to share these key insights to help elevate your publishing workflows. By adopting modular design structures and streamlining database queries, creators can achieve faster release cycles while maintaining exceptional quality standards."`;
+  }
+  if (type === "simplify") {
+    return `Simply put: when you write code in Next.js, standard pages are loaded dynamically by default. By enabling static optimization, the server builds the pages once when compiling, so visitors load them instantly.`;
+  }
+  if (type === "summarize") {
+    return JSON.stringify({
+      shortSummary: "A guide detailing Next.js optimization strategies and CMS publishing workflows.",
+      socialSummary: "⚡ Optimize your Next.js CMS! Learn how static pages, modular setups, and caching streamline user flows. #nextjs #webdev",
+      newsletterSummary: "Hello readers! In today's edition, we explore core web vitals optimizations in modern blog engines. Learn simple changes that yield fast pages.",
+      ogDescription: "A comprehensive deep dive into CMS layout structures, caching rules, and publishing tools."
+    });
+  }
+  if (type === "seo") {
+    return JSON.stringify({
+      titles: [
+        "10 Next.js Performance Hacks You Need to Know",
+        "How to Build a High-Performance Next.js CMS",
+        "Next.js SEO: A Complete Guide for Modern Blogs",
+        "Supercharging Next.js: Speed & Content Architecture",
+        "The Ultimate Next.js CMS Optimization Checklist"
+      ],
+      metaDescription: "Learn how to optimize your Next.js CMS platform using clean metadata APIs, sitemaps, caching, and modern web design structures.",
+      keywords: ["Next.js", "SEO Guide", "CMS optimization", "web performance", "metadata API", "static pages"],
+      score: 85,
+      suggestions: [
+        "Include the primary keyword in the first paragraph of your post.",
+        "Add a cover image Alt description to improve image accessibility search.",
+        "Include more internal link references to category posts."
+      ]
+    });
+  }
+  if (type === "tags") {
+    return JSON.stringify({
+      categories: ["Development", "Technology", "Web Design"],
+      tags: ["Nextjs", "React", "SEO", "CMS", "Tailwind", "JavaScript", "Prisma", "Database"]
+    });
+  }
+  if (type === "insights") {
+    return JSON.stringify({
+      readingLevel: "Grade 8 (Easy to read)",
+      complexity: "Moderate - Average sentence length is 14 words.",
+      passiveVoiceCount: 2,
+      repetitionScore: 12,
+      suggestions: [
+        "Try using active verbs instead of passive voice in your introduction.",
+        "Break down long sentences to improve scanning readability."
+      ]
+    });
+  }
+  return "AI Completion response placeholder.";
+}
+
+/**
+ * AI action: Generate AI completion details.
+ */
+export async function generateAICompletionAction(type: string, input: string, tone?: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    // Create a pending AIJob entry
+    const job = await prisma.aIJob.create({
+      data: {
+        type,
+        input: input.substring(0, 10000),
+        status: "pending",
+        userId: session.user.id,
+      },
+    });
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    let outputText = "";
+    let tokensUsed = 0;
+
+    if (apiKey) {
+      let prompt = "";
+      if (type === "outline") {
+        prompt = `Generate a structured, professional article outline in markdown bullet points for this topic:\n\n${input}`;
+      } else if (type === "expand") {
+        prompt = `Expand these bullet points or rough outline notes into full, descriptive, natural paragraphs:\n\n${input}`;
+      } else if (type === "rewrite") {
+        prompt = `Rewrite the following text to improve clarity, vocabulary, flow, and quality. Use a ${tone || "professional"} writing tone:\n\n${input}`;
+      } else if (type === "simplify") {
+        prompt = `Simplify this complex concept or text into simple, easy-to-understand explanations for a general audience:\n\n${input}`;
+      } else if (type === "summarize") {
+        prompt = `Generate a JSON object containing a short summary (1-2 sentences), a social media post summary with hashtags, a newsletter summary, and an OpenGraph description. Return ONLY the raw JSON block without markdown formatting or code blocks. The JSON must match this structure:\n{ "shortSummary": "...", "socialSummary": "...", "newsletterSummary": "...", "ogDescription": "..." }\n\nArticle Content:\n${input}`;
+      } else if (type === "seo") {
+        prompt = `Analyze this article content and return a JSON object with: 5 SEO title suggestions, a meta description (max 160 characters), 8 suggested search keywords, a content optimization score (number from 0 to 100), and an array of 3 specific suggestions to improve it. Return ONLY the raw JSON block without markdown formatting. The JSON must match this structure:\n{ "titles": ["...", "..."], "metaDescription": "...", "keywords": ["...", "..."], "score": 80, "suggestions": ["...", "..."] }\n\nArticle Content:\n${input}`;
+      } else if (type === "tags") {
+        prompt = `Scan this article content and return a JSON object with: 3 suggested categories and 6 suggested tags for one-click insertion. Return ONLY the raw JSON block without markdown formatting. The JSON must match this structure:\n{ "categories": ["...", "..."], "tags": ["...", "..."] }\n\nArticle Content:\n${input}`;
+      } else if (type === "insights") {
+        prompt = `Evaluate the readability of this text. Return a JSON object with: readingLevel (e.g. "Grade 8"), complexity (sentence structure analysis), passiveVoiceCount (number), repetitionScore (relative score from 0-100), and an array of 3 suggestions to improve reading clarity. Return ONLY the raw JSON block without markdown formatting. The JSON must match this structure:\n{ "readingLevel": "...", "complexity": "...", "passiveVoiceCount": 0, "repetitionScore": 0, "suggestions": ["...", "..."] }\n\nContent:\n${input}`;
+      } else {
+        prompt = `Provide assistance for: ${input}`;
+      }
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.statusText}`);
+      }
+
+      const resData = await response.json();
+      const text = resData?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+      
+      outputText = text.replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
+      tokensUsed = Math.floor(prompt.length / 4) + Math.floor(outputText.length / 4);
+    } else {
+      outputText = getMockAIResponse(type, input, tone);
+      tokensUsed = Math.floor(input.length / 4) + Math.floor(outputText.length / 4);
+    }
+
+    await prisma.aIJob.update({
+      where: { id: job.id },
+      data: {
+        output: outputText,
+        status: "completed",
+        tokensUsed,
+      },
+    });
+
+    return { success: true, data: outputText };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * AI action: Recommends related internal links based on content overlap.
+ */
+export async function suggestInternalLinksAction(currentPostId: string, content: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const posts = await prisma.post.findMany({
+      where: {
+        status: "published",
+        NOT: { id: currentPostId || "new" },
+      },
+      select: {
+        id: true,
+        title: true,
+        slug: true,
+        excerpt: true,
+      },
+      take: 10,
+    });
+
+    const cleanContent = content.toLowerCase();
+    const suggestions = posts
+      .map((post) => {
+        const words = post.title.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+        const matchCount = words.filter((w) => cleanContent.includes(w)).length;
+        return {
+          id: post.id,
+          title: post.title,
+          slug: post.slug,
+          excerpt: post.excerpt,
+          matchScore: matchCount,
+        };
+      })
+      .filter((p) => p.matchScore > 0)
+      .sort((a, b) => b.matchScore - a.matchScore)
+      .slice(0, 3);
+
+    return { success: true, data: suggestions };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * AI action: Fetches AI request usage statistics.
+ */
+export async function getAIUsageStatsAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    if (session.user.role !== "admin" && session.user.role !== "superadmin") {
+      throw new Error("Only administrators can view AI usage statistics.");
+    }
+
+    const [totalRequests, totalTokensResult, featureBreakdown, recentJobs] = await Promise.all([
+      prisma.aIJob.count(),
+      prisma.aIJob.aggregate({
+        _sum: { tokensUsed: true },
+      }),
+      prisma.aIJob.groupBy({
+        by: ["type"],
+        _count: { id: true },
+        _sum: { tokensUsed: true },
+      }),
+      prisma.aIJob.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        include: {
+          user: { select: { name: true, email: true } },
+        },
+      }),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        totalRequests,
+        totalTokens: totalTokensResult._sum.tokensUsed || 0,
+        featureBreakdown: featureBreakdown.map((f) => ({
+          type: f.type,
+          count: f._count.id,
+          tokens: f._sum.tokensUsed || 0,
+        })),
+        recentJobs: recentJobs.map((j) => ({
+          id: j.id,
+          type: j.type,
+          status: j.status,
+          tokensUsed: j.tokensUsed,
+          createdAt: j.createdAt.toISOString(),
+          user: j.user,
+        })),
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: Create a Personal Access Token / API key.
+ */
+export async function createApiKeyAction(name: string, permissions: string, expiresAt: Date | null) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    // Generate random secure token prefix with logbook_pat_
+    const rawToken = "logbook_pat_" + randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+    const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+
+    const key = await prisma.apiKey.create({
+      data: {
+        name,
+        tokenHash,
+        permissions,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        createdById: session.user.id,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        id: key.id,
+        name: key.name,
+        rawToken, // Plaintext token shown ONLY ONCE
+        permissions: key.permissions,
+        expiresAt: key.expiresAt?.toISOString() || null,
+        createdAt: key.createdAt.toISOString(),
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: Revoke an API key.
+ */
+export async function revokeApiKeyAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    await prisma.apiKey.delete({
+      where: { id },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: List all API keys generated by the active user.
+ */
+export async function getApiKeysListAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const keys = await prisma.apiKey.findMany({
+      where: { createdById: session.user.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: keys.map((k) => ({
+        id: k.id,
+        name: k.name,
+        permissions: k.permissions,
+        expiresAt: k.expiresAt?.toISOString() || null,
+        createdAt: k.createdAt.toISOString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: Create a webhook.
+ */
+export async function createWebhookAction(url: string, secret: string, events: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const webhook = await prisma.webhook.create({
+      data: {
+        url,
+        secret,
+        events,
+        createdById: session.user.id,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        id: webhook.id,
+        url: webhook.url,
+        events: webhook.events,
+        active: webhook.active,
+        createdAt: webhook.createdAt.toISOString(),
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: Toggle webhook active/inactive.
+ */
+export async function toggleWebhookAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const hook = await prisma.webhook.findUnique({ where: { id } });
+    if (!hook) throw new Error("Webhook not found");
+
+    await prisma.webhook.update({
+      where: { id },
+      data: { active: !hook.active },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: Delete a webhook subscription.
+ */
+export async function deleteWebhookAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    await prisma.webhook.delete({
+      where: { id },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Developer actions: List webhooks.
+ */
+export async function getWebhooksListAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const hooks = await prisma.webhook.findMany({
+      where: { createdById: session.user.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: hooks.map((h) => ({
+        id: h.id,
+        url: h.url,
+        events: h.events,
+        active: h.active,
+        createdAt: h.createdAt.toISOString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Plugin Actions: Get installed plugins list.
+ */
+export async function getPluginsListAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const plugins = await prisma.plugin.findMany({
+      include: { settings: true },
+      orderBy: { installedAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: plugins.map((p) => ({
+        id: p.id,
+        name: p.name,
+        version: p.version,
+        enabled: p.enabled,
+        installedAt: p.installedAt.toISOString(),
+        updatedAt: p.updatedAt.toISOString(),
+        settings: p.settings.reduce((acc, curr) => {
+          acc[curr.key] = curr.value;
+          return acc;
+        }, {} as Record<string, string>),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Plugin Actions: Install a plugin.
+ */
+export async function installPluginAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    if (session.user.role !== "admin" && session.user.role !== "superadmin") {
+      throw new Error("Only administrators can install extensions.");
+    }
+
+    const info = PLUGINS_REGISTRY.find((p) => p.id === id);
+    if (!info) throw new Error("Plugin not found in registry");
+
+    // Create plugin record
+    const plugin = await prisma.plugin.create({
+      data: {
+        id: info.id,
+        name: info.name,
+        version: info.version,
+      },
+    });
+
+    // Create default settings rows
+    const settingsData = Object.entries(info.defaultSettings).map(([key, value]) => ({
+      pluginId: plugin.id,
+      key,
+      value,
+    }));
+
+    await prisma.pluginSetting.createMany({
+      data: settingsData,
+    });
+
+    await prisma.activityLog.create({
+      data: {
+        action: "role_changed",
+        userId: session.user.id,
+        details: `Installed extension plugin: "${info.name}" v${info.version}`,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Plugin Actions: Toggle enabled status.
+ */
+export async function togglePluginAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    if (session.user.role !== "admin" && session.user.role !== "superadmin") {
+      throw new Error("Only administrators can toggle extensions.");
+    }
+
+    const plugin = await prisma.plugin.findUnique({ where: { id } });
+    if (!plugin) throw new Error("Plugin not found");
+
+    const updated = await prisma.plugin.update({
+      where: { id },
+      data: { enabled: !plugin.enabled },
+    });
+
+    return { success: true, enabled: updated.enabled };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Plugin Actions: Save setting values.
+ */
+export async function savePluginSettingsAction(pluginId: string, settings: Record<string, string>) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    // Update settings keys sequentially
+    for (const [key, value] of Object.entries(settings)) {
+      await prisma.pluginSetting.upsert({
+        where: {
+          pluginId_key: {
+            pluginId,
+            key,
+          },
+        },
+        create: {
+          pluginId,
+          key,
+          value,
+        },
+        update: {
+          value,
+        },
+      });
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Plugin Actions: Uninstall extension.
+ */
+export async function uninstallPluginAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) throw new Error("Unauthorized");
+    if (session.user.role !== "admin" && session.user.role !== "superadmin") {
+      throw new Error("Only administrators can uninstall extensions.");
+    }
+
+    await prisma.plugin.delete({ where: { id } });
 
     return { success: true };
   } catch (error: any) {

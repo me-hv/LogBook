@@ -17,6 +17,7 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
   role          String    @default("USER") // "USER" | "ADMIN"
+  status        String    @default("active") // "active" | "suspended"
   posts         Post[]
   sessions      Session[]
   accounts      Account[]
@@ -24,31 +25,49 @@ model User {
   comments      Comment[]
   reactions     Reaction[]
   notifications Notification[]
+  activities    ActivityLog[]
+  editorialNotes EditorialNote[]
+  revisions     PostRevision[]
+  lastEditedPosts Post[]    @relation("LastEditor")
+  publishedPosts  Post[]    @relation("Publisher")
+  reviewedPosts   Post[]    @relation("Reviewer")
+  aiJobs          AIJob[]
+  apiKeys         ApiKey[]
+  webhooks        Webhook[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
 
 model Post {
-  id          String    @id @default(cuid())
-  title       String
-  slug        String    @unique
-  excerpt     String?
-  content     String
-  coverImage  String?
-  status      String    @default("draft") // "draft" | "published"
-  readingTime Int       @default(0) // Reading time in minutes
-  views       Int       @default(0)
-  publishedAt DateTime?
-  authorId    String
-  author      User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  categoryId  String?
-  category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  tags        PostTag[]
-  viewsList   PostView[]
-  comments    Comment[]
-  reactions   Reaction[]
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  title         String
+  slug          String    @unique
+  excerpt       String?
+  content       String
+  coverImage    String?
+  status        String    @default("draft") // "draft" | "in_review" | "approved" | "scheduled" | "published" | "archived"
+  readingTime   Int       @default(0) // Reading time in minutes
+  views         Int       @default(0)
+  publishedAt   DateTime?
+  scheduledAt   DateTime?
+  authorId      String
+  author        User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  lastEditorId  String?
+  lastEditor    User?     @relation("LastEditor", fields: [lastEditorId], references: [id], onDelete: SetNull)
+  publisherId   String?
+  publisher     User?     @relation("Publisher", fields: [publisherId], references: [id], onDelete: SetNull)
+  reviewerId    String?
+  reviewer      User?     @relation("Reviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags          PostTag[]
+  viewsList     PostView[]
+  comments      Comment[]
+  reactions     Reaction[]
+  revisions     PostRevision[]
+  editorialNotes EditorialNote[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model Category {
@@ -205,6 +224,114 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+model Invitation {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  role      String   @default("author")
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model PostRevision {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  title     String
+  content   String
+  editorId  String
+  editor    User     @relation(fields: [editorId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@index([editorId])
+}
+
+model EditorialNote {
+  id        String   @id @default(cuid())
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+  @@index([authorId])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String   // "post_created", "post_edited", "post_reviewed", "post_published", "user_invited", "role_changed"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  details   String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model AIJob {
+  id         String   @id @default(cuid())
+  type       String   // "outline" | "expand" | "rewrite" | "summarize" | "simplify" | "tone" | "seo" | "tags" | "insights"
+  input      String   @db.Text
+  output     String?  @db.Text
+  status     String   @default("pending") // "pending" | "completed" | "failed"
+  tokensUsed Int      @default(0)
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  tokenHash   String    @unique
+  permissions String    // "read:posts,write:posts"
+  expiresAt   DateTime?
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([createdById])
+}
+
+model Webhook {
+  id          String    @id @default(cuid())
+  url         String
+  secret      String
+  events      String    // "post.created,post.published"
+  active      Boolean   @default(true)
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@index([createdById])
+}
+
+model Plugin {
+  id          String          @id // e.g. "seo-toolkit"
+  name        String
+  version     String
+  enabled     Boolean         @default(true)
+  installedAt DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  settings    PluginSetting[]
+}
+
+model PluginSetting {
+  id       String @id @default(cuid())
+  pluginId String
+  plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+  key      String
+  value    String
+
+  @@unique([pluginId, key])
+  @@index([pluginId])
 }
 
 
