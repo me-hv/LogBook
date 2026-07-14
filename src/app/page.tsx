@@ -10,6 +10,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { FeatureCard } from "@/components/FeatureCard";
+import { SubscribeForm } from "@/components/SubscribeForm";
 
 export default function Home() {
   const features = [
@@ -58,45 +59,41 @@ export default function Home() {
 
       {/* Hero Section */}
       <section className="relative z-10 max-w-4xl mx-auto px-4 pt-24 pb-16 sm:pt-32 sm:pb-24 text-center">
-        {/* Top Announcement Badge */}
-        <div className="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-650 dark:text-zinc-400 mb-6 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
-          <span>Introducing LogBook v1.0</span>
-          <ChevronRight className="w-3 h-3 text-zinc-400" />
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-650 dark:text-zinc-400 mb-6 select-none animate-fade-in">
+          <span>Introducing Phase 8</span>
+          <ChevronRight className="w-3.5 h-3.5" />
         </div>
-
-        <h1 className="text-4xl sm:text-6xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mb-6 max-w-2xl mx-auto leading-[1.1]">
-          LogBook
+        
+        <h1 className="text-4xl sm:text-6xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50 mb-6 leading-tight">
+          Write with <span className="underline decoration-zinc-400 dark:decoration-zinc-700 underline-offset-8">Markdown</span>,<br/>
+          deliver in milliseconds.
         </h1>
         
-        <p className="text-xl sm:text-2xl font-semibold text-zinc-800 dark:text-zinc-100 mb-4 max-w-xl mx-auto">
-          Your Markdown-first blogging platform.
+        <p className="text-base sm:text-lg text-zinc-600 dark:text-zinc-400 mb-8 max-w-lg mx-auto leading-relaxed">
+          LogBook is a lightweight blogging system featuring instant previews, category index mapping, dynamic feeds, and full analytics.
         </p>
 
-        <p className="text-base sm:text-lg text-zinc-600 dark:text-zinc-400 mb-10 max-w-xl mx-auto leading-relaxed">
-          Write, publish, and manage your content with the power of Markdown. Built for developers, designers, and creators who value simplicity and speed.
-        </p>
-
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+        <div className="flex justify-center gap-3">
           <Link
-            href="/admin"
-            className="flex items-center gap-2 w-full sm:w-auto justify-center px-6 py-3 rounded-full text-sm font-semibold bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-all shadow-sm"
+            href="/blog"
+            className="px-6 py-2.5 rounded-xl bg-zinc-900 dark:bg-zinc-50 text-zinc-50 dark:text-zinc-900 text-sm font-bold hover:bg-zinc-850 dark:hover:bg-zinc-200 transition-all shadow-sm flex items-center gap-1.5"
           >
-            <span>Get Started</span>
+            <span>Read Blog</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
-            href="/blog"
-            className="flex items-center justify-center w-full sm:w-auto px-6 py-3 rounded-full text-sm font-semibold border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all text-zinc-900 dark:text-zinc-50"
+            href="/login"
+            className="px-6 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-50 text-sm font-bold hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all"
           >
-            View Blog
+            <span>CMS Login</span>
           </Link>
         </div>
       </section>
 
       {/* Features Section */}
-      <section className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16 border-t border-zinc-150 dark:border-zinc-900">
-        <div className="text-center max-w-2xl mx-auto mb-16">
-          <h2 className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50 mb-4">
+      <section className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-20 border-t border-zinc-200 dark:border-zinc-900/60">
+        <div className="max-w-xl mb-12 space-y-2">
+          <h2 className="text-2xl sm:text-3xl font-extrabold text-zinc-900 dark:text-zinc-50 tracking-tight">
             Everything you need for a modern blog
           </h2>
           <p className="text-base text-zinc-600 dark:text-zinc-400">
@@ -117,7 +114,7 @@ export default function Home() {
       </section>
 
       {/* Tech Stack Callout */}
-      <section className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
+      <section className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 text-center">
         <div className="p-8 sm:p-12 border border-zinc-200 dark:border-zinc-800 rounded-3xl bg-zinc-50/50 dark:bg-zinc-950/20 backdrop-blur-sm max-w-3xl mx-auto">
           <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 dark:text-zinc-50 mb-4">
             Built on a modern developer stack
@@ -143,6 +140,15 @@ export default function Home() {
             </span>
           </div>
         </div>
+      </section>
+
+      {/* Subscription Callout on Homepage */}
+      <section className="relative z-10 max-w-3xl mx-auto px-4 py-16">
+        <SubscribeForm
+          source="homepage"
+          title="Subscribe to the LogBook Newsletter"
+          description="Receive email summaries of web development notes, tips, and articles once a week."
+        />
       </section>
     </div>
   );

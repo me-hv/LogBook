@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SearchBar } from "@/components/SearchBar";
 import { PostList } from "@/components/PostList";
 import { Pagination } from "@/components/Pagination";
+import { SubscribeForm } from "@/components/SubscribeForm";
 import { Post } from "@/types";
 
 interface BlogIndexClientProps {
@@ -54,6 +55,17 @@ export function BlogIndexClient({ initialPosts, currentPage, totalPages }: BlogI
           totalPages={totalPages}
           baseUrl="/blog"
         />
+      )}
+
+      {/* Newsletter signup on Blog Page */}
+      {!searchQuery && (
+        <section className="pt-10 border-t border-zinc-200 dark:border-zinc-800">
+          <SubscribeForm
+            source="blog"
+            title="Subscribe to updates"
+            description="Join our mailing list to receive notification alerts when new posts are published."
+          />
+        </section>
       )}
     </div>
   );

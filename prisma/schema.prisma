@@ -146,3 +146,14 @@ model DailyStats {
   totalViews     Int      @default(0)
   uniqueVisitors Int      @default(0)
 }
+
+model Subscriber {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  status           String    @default("active") // "active" | "unsubscribed" | "bounced"
+  unsubscribeToken String    @unique @default(uuid())
+  subscribedAt     DateTime  @default(now())
+  unsubscribedAt   DateTime?
+  source           String    @default("unknown")
+}
+

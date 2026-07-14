@@ -1,13 +1,30 @@
 import Link from "next/link";
 import { GitBranch } from "lucide-react";
+import { SubscribeForm } from "./SubscribeForm";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
 
   return (
-    <footer className="w-full border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black py-8 transition-colors">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-center md:text-left">
+    <footer className="w-full border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-black py-12 transition-colors">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+        <div className="grid md:grid-cols-2 gap-8 items-start pb-8 border-b border-zinc-200 dark:border-zinc-900/60">
+          <div className="space-y-3">
+            <h4 className="text-sm font-extrabold text-zinc-900 dark:text-zinc-50 uppercase tracking-wider">
+              LogBook
+            </h4>
+            <p className="text-xs sm:text-sm text-zinc-550 dark:text-zinc-400 leading-relaxed max-w-sm">
+              Write, publish, and manage your content with the power of Markdown. Subscribe to updates to stay up to date.
+            </p>
+          </div>
+          <SubscribeForm
+            source="footer"
+            title="Stay Updated"
+            description="Join our mailing list to receive notification alerts when new posts are published."
+          />
+        </div>
+
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-center md:text-left pt-2">
           {/* Copyright & Info */}
           <div className="text-sm text-zinc-500 dark:text-zinc-400">
             <span>© {currentYear} LogBook. All rights reserved.</span>

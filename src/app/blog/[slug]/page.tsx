@@ -10,6 +10,7 @@ import { ReadingProgress } from "@/components/ReadingProgress";
 import { BackToTop } from "@/components/BackToTop";
 import { AuthorCard } from "@/components/AuthorCard";
 import { RelatedPosts } from "@/components/RelatedPosts";
+import { SubscribeForm } from "@/components/SubscribeForm";
 import { extractHeadings } from "@/lib/markdown";
 import { recordPostView } from "@/services/analytics";
 
@@ -137,6 +138,13 @@ export default async function BlogPostPage({ params }: PageProps) {
                 image: post.author.image,
                 email: post.author.email,
               }}
+            />
+
+            {/* Newsletter Subscription box */}
+            <SubscribeForm
+              source="article"
+              title="Never Miss a Publication"
+              description="Enjoyed this article? Join our newsletter to receive automatic notifications whenever we publish new content."
             />
 
             {/* Previous & Next Navigation */}

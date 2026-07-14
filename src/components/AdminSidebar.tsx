@@ -12,6 +12,8 @@ import {
   BookOpen,
   Image,
   BarChart3,
+  Mail,
+  Users,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
@@ -70,6 +72,18 @@ export function AdminSidebar() {
       href: "/admin/analytics",
       icon: <BarChart3 className="w-4 h-4" />,
       active: pathname.startsWith("/admin/analytics"),
+    },
+    {
+      name: "Newsletter",
+      href: "/admin/newsletter",
+      icon: <Mail className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/newsletter"),
+    },
+    {
+      name: "Subscribers",
+      href: "/admin/subscribers",
+      icon: <Users className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/subscribers"),
     },
     {
       name: "Settings",
