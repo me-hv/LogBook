@@ -51,7 +51,7 @@ export function PostHeader({ post }: PostHeaderProps) {
         {/* Category Badge */}
         {post.category && (
           <Link
-            href={`/categories/${post.category.slug}`}
+            href={`/category/${post.category.slug}`}
             className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-zinc-100 dark:bg-zinc-900 text-zinc-850 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
           >
             {post.category.name}

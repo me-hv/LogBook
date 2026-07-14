@@ -6,6 +6,23 @@ interface MarkdownPreviewProps {
   content: string;
 }
 
+// Helpers to extract clean text and generate matching heading IDs for TOC anchors
+const cleanText = (node: any): string => {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(cleanText).join("");
+  if (node?.props?.children) return cleanText(node.props.children);
+  return "";
+};
+
+const getHeaderId = (children: any) => {
+  const text = cleanText(children);
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+};
+
 export function MarkdownPreview({ content }: MarkdownPreviewProps) {
   return (
     <div className="prose-like-markdown select-text text-zinc-800 dark:text-zinc-205">
@@ -18,10 +35,22 @@ export function MarkdownPreview({ content }: MarkdownPreviewProps) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight]}
         components={{
-          h1: ({ children }) => <h1 className="text-3xl font-extrabold tracking-tight mt-8 mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2 first:mt-0">{children}</h1>,
-          h2: ({ children }) => <h2 className="text-2xl font-bold tracking-tight mt-6 mb-3 border-b border-zinc-200 dark:border-zinc-800 pb-1 first:mt-0">{children}</h2>,
-          h3: ({ children }) => <h3 className="text-xl font-semibold mt-6 mb-2">{children}</h3>,
-          h4: ({ children }) => <h4 className="text-lg font-semibold mt-4 mb-2">{children}</h4>,
+          h1: ({ children }) => {
+            const id = getHeaderId(children);
+            return <h1 id={id} className="text-3xl font-extrabold tracking-tight mt-8 mb-4 border-b border-zinc-200 dark:border-zinc-800 pb-2 first:mt-0">{children}</h1>;
+          },
+          h2: ({ children }) => {
+            const id = getHeaderId(children);
+            return <h2 id={id} className="text-2xl font-bold tracking-tight mt-6 mb-3 border-b border-zinc-200 dark:border-zinc-800 pb-1 first:mt-0">{children}</h2>;
+          },
+          h3: ({ children }) => {
+            const id = getHeaderId(children);
+            return <h3 id={id} className="text-xl font-semibold mt-6 mb-2">{children}</h3>;
+          },
+          h4: ({ children }) => {
+            const id = getHeaderId(children);
+            return <h4 id={id} className="text-lg font-semibold mt-4 mb-2">{children}</h4>;
+          },
           p: ({ children }) => <p className="leading-relaxed my-4 text-sm sm:text-base">{children}</p>,
           ul: ({ children }) => <ul className="list-disc list-inside space-y-1.5 my-4 pl-4">{children}</ul>,
           ol: ({ children }) => <ol className="list-decimal list-inside space-y-1.5 my-4 pl-4">{children}</ol>,

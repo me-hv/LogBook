@@ -3,13 +3,16 @@
 import { useState } from "react";
 import { SearchBar } from "@/components/SearchBar";
 import { PostList } from "@/components/PostList";
+import { Pagination } from "@/components/Pagination";
 import { Post } from "@/types";
 
 interface BlogIndexClientProps {
   initialPosts: Post[];
+  currentPage: number;
+  totalPages: number;
 }
 
-export function BlogIndexClient({ initialPosts }: BlogIndexClientProps) {
+export function BlogIndexClient({ initialPosts, currentPage, totalPages }: BlogIndexClientProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredPosts = initialPosts.filter((post) => {
@@ -24,7 +27,7 @@ export function BlogIndexClient({ initialPosts }: BlogIndexClientProps) {
   });
 
   return (
-    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12 md:py-16 space-y-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12 pb-8 border-b border-zinc-200 dark:border-zinc-800">
         <div>
@@ -43,6 +46,15 @@ export function BlogIndexClient({ initialPosts }: BlogIndexClientProps) {
         posts={filteredPosts}
         fallbackText={`No articles found matching "${searchQuery}"`}
       />
+
+      {/* Pagination (only visible when not searching) */}
+      {!searchQuery && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          baseUrl="/blog"
+        />
+      )}
     </div>
   );
 }

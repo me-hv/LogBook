@@ -1,8 +1,46 @@
-import { getPosts } from "@/services/db";
+import { prisma } from "@/lib/prisma";
 import { BlogIndexClient } from "./BlogIndexClient";
 
-export default async function BlogIndexPage() {
-  const posts = await getPosts({ status: "published" });
+interface PageProps {
+  searchParams: Promise<{ page?: string }>;
+}
+
+export default async function BlogIndexPage({ searchParams }: PageProps) {
+  const { page: pageParam } = await searchParams;
+  
+  const currentPage = parseInt(pageParam || "1", 10);
+  const postsPerPage = 6;
+  const skip = (currentPage - 1) * postsPerPage;
+
+  const [posts, totalCount] = await Promise.all([
+    prisma.post.findMany({
+      where: { status: "published" },
+      skip,
+      take: postsPerPage,
+      orderBy: { createdAt: "desc" },
+      include: {
+        author: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            image: true,
+          },
+        },
+        category: true,
+        tags: {
+          include: {
+            tag: true,
+          },
+        },
+      },
+    }),
+    prisma.post.count({
+      where: { status: "published" },
+    }),
+  ]);
+
+  const totalPages = Math.ceil(totalCount / postsPerPage);
 
   const serializedPosts = posts.map((post) => ({
     id: post.id,
@@ -23,5 +61,12 @@ export default async function BlogIndexPage() {
     tags: post.tags.map((t) => ({ tag: { id: t.tag.id, name: t.tag.name, slug: t.tag.slug } })),
   }));
 
-  return <BlogIndexClient initialPosts={serializedPosts} />;
+  return (
+    <BlogIndexClient
+      initialPosts={serializedPosts}
+      currentPage={currentPage}
+      totalPages={totalPages}
+    />
+  );
 }
+export const dynamic = "force-dynamic";

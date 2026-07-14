@@ -21,7 +21,7 @@ export function PostCard({ post }: PostCardProps) {
       <div className="flex flex-wrap gap-2 mb-3">
         {post.category && (
           <Link
-            href={`/categories/${post.category.slug}`}
+            href={`/category/${post.category.slug}`}
             className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-900 text-zinc-850 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
           >
             {post.category.name}
@@ -30,7 +30,7 @@ export function PostCard({ post }: PostCardProps) {
         {post.tags.map(({ tag }) => (
           <Link
             key={tag.id}
-            href={`/tags/${tag.slug}`}
+            href={`/tag/${tag.slug}`}
             className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors"
           >
             #{tag.name}
