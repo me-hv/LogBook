@@ -6,6 +6,7 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
+import { supabaseAdmin, ensureBucketExists } from "@/lib/supabase";
 
 // Helper path for settings
 const settingsFilePath = path.join(process.cwd(), "src/lib/settings.json");
@@ -237,6 +238,157 @@ export async function deleteTag(id: string) {
       where: { id },
     });
     revalidatePath("/admin/tags");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+// Media Actions
+export async function getMediaList(search?: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) return [];
+
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { filename: { contains: search, mode: "insensitive" } },
+        { originalName: { contains: search, mode: "insensitive" } },
+      ];
+    }
+
+    return await prisma.media.findMany({
+      where,
+      include: {
+        uploadedBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+  } catch (err) {
+    console.error("Failed to query media list:", err);
+    return [];
+  }
+}
+
+export async function uploadMediaAction(formData: FormData) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) return { success: false, error: "Unauthorized." };
+
+    const file = formData.get("file") as File;
+    const bucket = (formData.get("bucket") as string) || "post-images";
+
+    if (!file) return { success: false, error: "No file provided." };
+
+    if (file.size > 5 * 1024 * 1024) {
+      return { success: false, error: "File size exceeds 5MB limit." };
+    }
+
+    const allowedMimeTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];
+    if (!allowedMimeTypes.includes(file.type)) {
+      return { success: false, error: "Unsupported image type." };
+    }
+
+    const ext = file.name.split(".").pop();
+    const baseName = file.name.substring(0, file.name.lastIndexOf("."));
+    const cleanBaseName = baseName.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    const filename = `${cleanBaseName}-${Date.now()}.${ext}`;
+
+    await ensureBucketExists(bucket);
+
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from(bucket)
+      .upload(filename, buffer, {
+        contentType: file.type,
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: urlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(filename);
+    const publicUrl = urlData.publicUrl;
+
+    const media = await prisma.media.create({
+      data: {
+        filename,
+        originalName: file.name,
+        url: publicUrl,
+        size: file.size,
+        mimeType: file.type,
+        uploadedById: session.user.id,
+      },
+    });
+
+    revalidatePath("/admin/media");
+    return { success: true, media };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function renameMediaAction(id: string, newName: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) return { success: false, error: "Unauthorized." };
+
+    const media = await prisma.media.findUnique({ where: { id } });
+    if (!media) return { success: false, error: "Media not found." };
+
+    if (session.user.role !== "admin" && media.uploadedById !== session.user.id) {
+      return { success: false, error: "Unauthorized to rename this asset." };
+    }
+
+    const updated = await prisma.media.update({
+      where: { id },
+      data: { filename: newName },
+    });
+    revalidatePath("/admin/media");
+    return { success: true, media: updated };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function deleteMediaAction(id: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) return { success: false, error: "Unauthorized." };
+
+    const media = await prisma.media.findUnique({ where: { id } });
+    if (!media) return { success: false, error: "Media not found." };
+
+    if (session.user.role !== "admin" && media.uploadedById !== session.user.id) {
+      return { success: false, error: "Unauthorized to delete this asset." };
+    }
+
+    try {
+      const urlParts = media.url.split("/storage/v1/object/public/");
+      if (urlParts.length === 2) {
+        const pathParts = urlParts[1].split("/");
+        const bucket = pathParts[0];
+        const filename = pathParts.slice(1).join("/");
+
+        const { error } = await supabaseAdmin.storage.from(bucket).remove([filename]);
+        if (error) console.warn("Supabase storage removal warning:", error.message);
+      }
+    } catch (e: any) {
+      console.warn("Failed to delete physical file in Supabase:", e.message);
+    }
+
+    await prisma.media.delete({ where: { id } });
+    revalidatePath("/admin/media");
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message };

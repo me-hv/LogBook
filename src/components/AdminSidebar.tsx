@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   BookOpen,
+  Image,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
@@ -56,6 +57,12 @@ export function AdminSidebar() {
       href: "/admin/tags",
       icon: <Tags className="w-4 h-4" />,
       active: pathname.startsWith("/admin/tags"),
+    },
+    {
+      name: "Media",
+      href: "/admin/media",
+      icon: <Image className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/media"),
     },
     {
       name: "Settings",

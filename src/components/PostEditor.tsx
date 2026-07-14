@@ -3,11 +3,12 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Save, AlertCircle, Sparkles, CheckCircle2 } from "lucide-react";
+import { Save, AlertCircle, Sparkles, CheckCircle2, Image as ImageIcon } from "lucide-react";
 import { CategorySelector } from "./CategorySelector";
 import { TagSelector } from "./TagSelector";
 import { MarkdownEditor } from "./MarkdownEditor";
 import { calculateReadingTime } from "./ReadingTime";
+import { MediaSelector } from "./MediaSelector";
 import { createPost, updatePost } from "@/app/admin/actions";
 
 interface Category {
@@ -53,6 +54,7 @@ export function PostEditor({ categories, tags, initialPost }: PostEditorProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [saveIndicator, setSaveIndicator] = useState("");
+  const [showCoverSelector, setShowCoverSelector] = useState(false);
 
   // Auto-generate slug from title
   const handleTitleChange = (val: string) => {
@@ -318,15 +320,34 @@ export function PostEditor({ categories, tags, initialPost }: PostEditorProps) {
               <label className="text-[10px] font-bold text-zinc-450 dark:text-zinc-555 uppercase tracking-wider">
                 Cover Image URL
               </label>
-              <input
-                type="text"
-                value={coverImage}
-                onChange={(e) => setCoverImage(e.target.value)}
-                placeholder="https://images.unsplash.com/..."
-                className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={coverImage}
+                  onChange={(e) => setCoverImage(e.target.value)}
+                  placeholder="https://images.unsplash.com/..."
+                  className="block w-full px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-white dark:bg-zinc-900/20 text-xs text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-1 focus:ring-zinc-900 dark:focus:ring-zinc-100 transition-all flex-grow"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCoverSelector(true)}
+                  className="px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50 dark:bg-zinc-900 text-zinc-650 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer flex items-center justify-center"
+                  title="Choose from Media Library"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
+
+          {/* Cover Media Selector Modal */}
+          {showCoverSelector && (
+            <MediaSelector
+              onClose={() => setShowCoverSelector(false)}
+              onSelect={(url) => setCoverImage(url)}
+              title="Select Cover Image"
+            />
+          )}
 
           {/* Publishing taxonomy card */}
           <div className="bg-white dark:bg-zinc-950/40 p-6 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4 shadow-sm">

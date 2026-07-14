@@ -20,6 +20,7 @@ model User {
   posts         Post[]
   sessions      Session[]
   accounts      Account[]
+  media         Media[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -111,6 +112,14 @@ model Verification {
   createdAt  DateTime? @default(now())
   updatedAt  DateTime? @updatedAt
 }
-
-
-
+model Media {
+  id           String   @id @default(cuid())
+  filename     String
+  originalName String
+  url          String
+  size         Int
+  mimeType     String
+  uploadedById String
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
