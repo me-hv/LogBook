@@ -394,3 +394,278 @@ export async function deleteMediaAction(id: string) {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Fetch and aggregate database analytics metrics for creators and admins.
+ * Automatically handles timeRange filters and role-based access controls.
+ */
+export async function getAnalyticsData(timeRange: string = "30days") {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+    const userRole = session.user.role; // "admin" | "author"
+
+    const isAuthorOnly = userRole === "author";
+
+    let startDate: Date | undefined;
+    const now = new Date();
+
+    if (timeRange === "today") {
+      startDate = new Date(now.setHours(0, 0, 0, 0));
+    } else if (timeRange === "7days") {
+      startDate = new Date(now.setDate(now.getDate() - 7));
+    } else if (timeRange === "30days") {
+      startDate = new Date(now.setDate(now.getDate() - 30));
+    } else if (timeRange === "90days") {
+      startDate = new Date(now.setDate(now.getDate() - 90));
+    }
+
+    const postWhere: any = {};
+    if (isAuthorOnly) {
+      postWhere.authorId = userId;
+    }
+
+    const viewsWhere: any = {};
+    if (startDate) {
+      viewsWhere.viewedAt = { gte: startDate };
+    }
+    if (isAuthorOnly) {
+      viewsWhere.post = { authorId: userId };
+    }
+
+    const [totalPosts, publishedPosts, draftPosts] = await Promise.all([
+      prisma.post.count({ where: postWhere }),
+      prisma.post.count({ where: { ...postWhere, status: "published" } }),
+      prisma.post.count({ where: { ...postWhere, status: "draft" } }),
+    ]);
+
+    const viewsList = await prisma.postView.findMany({
+      where: viewsWhere,
+      include: {
+        post: {
+          select: {
+            title: true,
+            slug: true,
+            authorId: true,
+          },
+        },
+      },
+      orderBy: { viewedAt: "asc" },
+    });
+
+    const postsData = await prisma.post.findMany({
+      where: postWhere,
+      select: {
+        readingTime: true,
+        views: true,
+        title: true,
+        slug: true,
+        createdAt: true,
+        publishedAt: true,
+      },
+    });
+
+    const totalViews = viewsList.length;
+    const uniqueVisitors = new Set(viewsList.map((v) => v.sessionId)).size;
+
+    const avgReadingTime = postsData.length > 0
+      ? Math.round(postsData.reduce((acc, p) => acc + p.readingTime, 0) / postsData.length)
+      : 0;
+
+    const postViewCounts: Record<string, { title: string; slug: string; count: number; createdAt: Date; publishedAt: Date | null }> = {};
+    
+    postsData.forEach((p) => {
+      postViewCounts[p.title] = {
+        title: p.title,
+        slug: p.slug,
+        count: 0,
+        createdAt: p.createdAt,
+        publishedAt: p.publishedAt,
+      };
+    });
+
+    viewsList.forEach((v) => {
+      const title = v.post.title;
+      if (postViewCounts[title]) {
+        postViewCounts[title].count++;
+      }
+    });
+
+    const sortedPosts = Object.values(postViewCounts).sort((a, b) => b.count - a.count);
+    
+    const mostPopularPost = sortedPosts.length > 0 && sortedPosts[0].count > 0
+      ? `${sortedPosts[0].title} (${sortedPosts[0].count} views)`
+      : "None";
+
+    const viewsOverTime: Record<string, { date: string; views: number; visitors: number; visitorIds: Set<string> }> = {};
+    
+    const loopDate = new Date(startDate || now);
+    if (!startDate) {
+      const minDate = viewsList.length > 0 ? new Date(viewsList[0].viewedAt) : new Date(now.setDate(now.getDate() - 30));
+      loopDate.setTime(minDate.getTime());
+    }
+    loopDate.setHours(0, 0, 0, 0);
+
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
+
+    while (loopDate <= todayDate) {
+      const dateKey = loopDate.toISOString().split("T")[0];
+      viewsOverTime[dateKey] = { date: dateKey, views: 0, visitors: 0, visitorIds: new Set() };
+      loopDate.setDate(loopDate.getDate() + 1);
+    }
+
+    viewsList.forEach((v) => {
+      const dateKey = new Date(v.viewedAt).toISOString().split("T")[0];
+      if (viewsOverTime[dateKey]) {
+        viewsOverTime[dateKey].views++;
+        viewsOverTime[dateKey].visitorIds.add(v.sessionId);
+      }
+    });
+
+    const chartData = Object.values(viewsOverTime).map((d) => ({
+      date: d.date,
+      views: d.views,
+      visitors: d.visitorIds.size,
+    }));
+
+    const devices: Record<string, number> = { desktop: 0, mobile: 0, tablet: 0 };
+    viewsList.forEach((v) => {
+      const dev = v.deviceType.toLowerCase();
+      if (dev in devices) {
+        devices[dev]++;
+      } else {
+        devices.desktop++;
+      }
+    });
+
+    const deviceData = Object.entries(devices).map(([name, value]) => ({ name, value }));
+
+    const traffic: Record<string, number> = { "Direct Traffic": 0, "Search Engines": 0, "Social Media": 0, "Referral Traffic": 0 };
+    viewsList.forEach((v) => {
+      const ref = v.referrer;
+      if (ref === "Direct") {
+        traffic["Direct Traffic"]++;
+      } else if (["Google", "Bing", "Yahoo", "Search"].includes(ref)) {
+        traffic["Search Engines"]++;
+      } else if (["Twitter/X", "LinkedIn", "Reddit", "GitHub", "Facebook"].includes(ref)) {
+        traffic["Social Media"]++;
+      } else {
+        traffic["Referral Traffic"]++;
+      }
+    });
+
+    const trafficData = Object.entries(traffic).map(([source, count]) => ({
+      source,
+      count,
+      percentage: totalViews > 0 ? Math.round((count / totalViews) * 100) : 0,
+    }));
+
+    const referrersCount: Record<string, number> = {};
+    viewsList.forEach((v) => {
+      const ref = v.referrer;
+      referrersCount[ref] = (referrersCount[ref] || 0) + 1;
+    });
+
+    const referrerData = Object.entries(referrersCount)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    const countriesCount: Record<string, number> = {};
+    const citiesCount: Record<string, number> = {};
+
+    viewsList.forEach((v) => {
+      const country = v.country === "Unknown" ? "United States" : v.country;
+      const city = v.city;
+      countriesCount[country] = (countriesCount[country] || 0) + 1;
+      if (city !== "Unknown") {
+        citiesCount[city] = (citiesCount[city] || 0) + 1;
+      }
+    });
+
+    const countryData = Object.entries(countriesCount)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const cityData = Object.entries(citiesCount)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+
+    const weeklyViews = viewsList.filter((v) => new Date(v.viewedAt) >= oneWeekAgo).length;
+    const monthlyViews = viewsList.filter((v) => new Date(v.viewedAt) >= oneMonthAgo).length;
+
+    const mostViewedPosts = sortedPosts.slice(0, 5).map((p) => ({
+      title: p.title,
+      slug: p.slug,
+      views: p.count,
+      readingTime: postsData.find((x) => x.slug === p.slug)?.readingTime || 0,
+    }));
+
+    const recentlyPublishedPosts = sortedPosts
+      .filter((p) => p.publishedAt !== null)
+      .sort((a, b) => new Date(b.publishedAt!).getTime() - new Date(a.publishedAt!).getTime())
+      .slice(0, 5)
+      .map((p) => ({
+        title: p.title,
+        slug: p.slug,
+        views: p.count,
+        readingTime: postsData.find((x) => x.slug === p.slug)?.readingTime || 0,
+      }));
+
+    const lowestPerformingPosts = sortedPosts
+      .filter((p) => p.publishedAt !== null)
+      .sort((a, b) => a.count - b.count)
+      .slice(0, 5)
+      .map((p) => ({
+        title: p.title,
+        slug: p.slug,
+        views: p.count,
+        readingTime: postsData.find((x) => x.slug === p.slug)?.readingTime || 0,
+      }));
+
+    return {
+      success: true,
+      data: {
+        cards: {
+          totalPosts,
+          publishedPosts,
+          draftPosts,
+          totalViews,
+          uniqueVisitors,
+          weeklyViews,
+          monthlyViews,
+          avgReadingTime,
+          mostPopularPost,
+        },
+        chartData,
+        deviceData,
+        trafficData,
+        referrerData,
+        countryData,
+        cityData,
+        performance: {
+          mostViewed: mostViewedPosts,
+          recentlyPublished: recentlyPublishedPosts,
+          lowestPerforming: lowestPerformingPosts,
+        },
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

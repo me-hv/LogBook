@@ -41,6 +41,7 @@ model Post {
   categoryId  String?
   category    Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   tags        PostTag[]
+  viewsList   PostView[]
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 }
@@ -122,4 +123,26 @@ model Media {
   uploadedById String
   uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
+}
+
+model PostView {
+  id         String   @id @default(cuid())
+  postId     String
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  sessionId  String
+  country    String   @default("Unknown")
+  city       String   @default("Unknown")
+  deviceType String   @default("desktop")
+  referrer   String   @default("Direct")
+  viewedAt   DateTime @default(now())
+
+  @@index([postId])
+  @@index([viewedAt])
+}
+
+model DailyStats {
+  id             String   @id @default(cuid())
+  date           DateTime @unique
+  totalViews     Int      @default(0)
+  uniqueVisitors Int      @default(0)
 }

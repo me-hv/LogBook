@@ -11,6 +11,7 @@ import {
   LogOut,
   BookOpen,
   Image,
+  BarChart3,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
@@ -63,6 +64,12 @@ export function AdminSidebar() {
       href: "/admin/media",
       icon: <Image className="w-4 h-4" />,
       active: pathname.startsWith("/admin/media"),
+    },
+    {
+      name: "Analytics",
+      href: "/admin/analytics",
+      icon: <BarChart3 className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/analytics"),
     },
     {
       name: "Settings",

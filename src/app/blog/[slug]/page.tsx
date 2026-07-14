@@ -11,6 +11,7 @@ import { BackToTop } from "@/components/BackToTop";
 import { AuthorCard } from "@/components/AuthorCard";
 import { RelatedPosts } from "@/components/RelatedPosts";
 import { extractHeadings } from "@/lib/markdown";
+import { recordPostView } from "@/services/analytics";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -47,13 +48,8 @@ export default async function BlogPostPage({ params }: PageProps) {
     notFound();
   }
 
-  // Update views in the background (non-blocking)
-  prisma.post
-    .update({
-      where: { id: post.id },
-      data: { views: { increment: 1 } },
-    })
-    .catch((err) => console.error("Failed to increment views", err));
+  // Record view in background
+  recordPostView(post.id).catch((err) => console.error("Failed to record view", err));
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
   const postUrl = `${siteUrl}/blog/${post.slug}`;
