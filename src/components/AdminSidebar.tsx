@@ -14,6 +14,7 @@ import {
   BarChart3,
   Mail,
   Users,
+  MessageSquare,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 
@@ -84,6 +85,12 @@ export function AdminSidebar() {
       href: "/admin/subscribers",
       icon: <Users className="w-4 h-4" />,
       active: pathname.startsWith("/admin/subscribers"),
+    },
+    {
+      name: "Comments",
+      href: "/admin/comments",
+      icon: <MessageSquare className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/comments"),
     },
     {
       name: "Settings",

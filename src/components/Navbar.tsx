@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Menu, X, BookOpen } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
+import { NotificationBell } from "./NotificationBell";
 import { authClient } from "@/lib/auth-client";
 
 export function Navbar() {
@@ -46,6 +47,7 @@ export function Navbar() {
               </Link>
             ))}
             <span className="w-px h-5 bg-zinc-200 dark:bg-zinc-800" />
+            {user && <NotificationBell />}
             <ThemeToggle />
             
             {user ? (
@@ -62,6 +64,7 @@ export function Navbar() {
 
           {/* Mobile Menu Button */}
           <div className="flex md:hidden items-center gap-4">
+            {user && <NotificationBell />}
             <ThemeToggle />
             {user && <UserMenu user={user} />}
             <button

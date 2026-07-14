@@ -944,3 +944,470 @@ export async function getNewsletterStats() {
     return { success: false, error: error.message };
   }
 }
+
+function filterProfanity(text: string): string {
+  const badWords = ["spam", "casino", "viagra", "porn", "drugs", "cryptohack"];
+  let clean = text;
+  for (const word of badWords) {
+    const reg = new RegExp(word, "gi");
+    clean = clean.replace(reg, "***");
+  }
+  return clean;
+}
+
+/**
+ * PUBLIC/USER action: Adds a comment to a post.
+ */
+export async function createComment(postId: string, content: string, parentId?: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("You must be logged in to comment.");
+    }
+
+    const userId = session.user.id;
+    const cleanContent = filterProfanity(content.trim());
+
+    if (!cleanContent) {
+      throw new Error("Comment content cannot be empty.");
+    }
+
+    // Heuristics: Rate limiting - check if same user commented same content within 15 seconds
+    const fifteenSecondsAgo = new Date(Date.now() - 15 * 1000);
+    const spamCheck = await prisma.comment.findFirst({
+      where: {
+        authorId: userId,
+        content: cleanContent,
+        createdAt: { gte: fifteenSecondsAgo },
+      },
+    });
+
+    if (spamCheck) {
+      throw new Error("Duplicate comment detected. Please wait a moment before sending again.");
+    }
+
+    const comment = await prisma.comment.create({
+      data: {
+        postId,
+        content: cleanContent,
+        authorId: userId,
+        parentId: parentId || null,
+        status: "approved",
+      },
+      include: {
+        author: {
+          select: { name: true, image: true, email: true },
+        },
+      },
+    });
+
+    // Notify post author in background (if not the commenter)
+    const post = await prisma.post.findUnique({
+      where: { id: postId },
+      select: { authorId: true },
+    });
+
+    if (post && post.authorId !== userId) {
+      await prisma.notification.create({
+        data: {
+          type: "comment",
+          userId: post.authorId,
+          entityId: comment.id,
+        },
+      });
+    }
+
+    // If reply, notify parent comment author (if not same user)
+    if (parentId) {
+      const parentComment = await prisma.comment.findUnique({
+        where: { id: parentId },
+        select: { authorId: true },
+      });
+      if (parentComment && parentComment.authorId !== userId) {
+        await prisma.notification.create({
+          data: {
+            type: "reply",
+            userId: parentComment.authorId,
+            entityId: comment.id,
+          },
+        });
+      }
+    }
+
+    return { success: true, comment };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * PUBLIC/USER action: Fetch comments for a post.
+ */
+export async function getPostComments(postId: string) {
+  try {
+    const comments = await prisma.comment.findMany({
+      where: {
+        postId,
+        status: "approved",
+      },
+      include: {
+        author: {
+          select: { id: true, name: true, image: true, email: true },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const serialized = comments.map(c => ({
+      id: c.id,
+      content: c.content,
+      postId: c.postId,
+      authorId: c.authorId,
+      parentId: c.parentId,
+      status: c.status,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+      author: c.author,
+    }));
+
+    return { success: true, data: serialized };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * USER/ADMIN action: Delete a comment (Admins, Post Authors, or Comment Author within 15 minutes).
+ */
+export async function deleteCommentAction(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+    const userRole = session.user.role;
+
+    const comment = await prisma.comment.findUnique({
+      where: { id },
+      include: { post: true },
+    });
+
+    if (!comment) {
+      throw new Error("Comment not found.");
+    }
+
+    const isAdmin = userRole === "admin";
+    const isPostAuthor = comment.post.authorId === userId;
+    const isCommentAuthor = comment.authorId === userId;
+    
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+    const isWithinTimeLimit = comment.createdAt >= fifteenMinsAgo;
+
+    const allowed = isAdmin || isPostAuthor || (isCommentAuthor && isWithinTimeLimit);
+
+    if (!allowed) {
+      throw new Error("You do not have permission to delete this comment or the 15-minute edit window has closed.");
+    }
+
+    await prisma.comment.delete({ where: { id } });
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN/AUTHOR action: Moderate a comment.
+ */
+export async function moderateCommentAction(id: string, status: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+    const userRole = session.user.role;
+
+    const comment = await prisma.comment.findUnique({
+      where: { id },
+      include: { post: true },
+    });
+
+    if (!comment) {
+      throw new Error("Comment not found.");
+    }
+
+    const isAdmin = userRole === "admin";
+    const isPostAuthor = comment.post.authorId === userId;
+
+    if (!isAdmin && !isPostAuthor) {
+      throw new Error("You do not have permission to moderate this comment.");
+    }
+
+    await prisma.comment.update({
+      where: { id },
+      data: { status },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * ADMIN/AUTHOR action: Get comments list for moderation.
+ */
+export async function getModerationCommentsList(status: string = "all", search: string = "") {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+    const userRole = session.user.role;
+    const isAuthorOnly = userRole === "author";
+
+    const where: any = {};
+    if (isAuthorOnly) {
+      where.post = { authorId: userId };
+    }
+
+    if (status !== "all") {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { content: { contains: search, mode: "insensitive" } },
+        { author: { email: { contains: search, mode: "insensitive" } } },
+        { author: { name: { contains: search, mode: "insensitive" } } },
+      ];
+    }
+
+    const comments = await prisma.comment.findMany({
+      where,
+      include: {
+        author: {
+          select: { name: true, email: true, image: true },
+        },
+        post: {
+          select: { title: true, slug: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: comments.map(c => ({
+        id: c.id,
+        content: c.content,
+        status: c.status,
+        createdAt: c.createdAt.toISOString(),
+        author: c.author,
+        post: c.post,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * USER action: Toggle post reaction.
+ */
+export async function togglePostReaction(postId: string, type: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("You must be logged in to react.");
+    }
+
+    const userId = session.user.id;
+
+    const existing = await prisma.reaction.findUnique({
+      where: {
+        userId_postId_type: {
+          userId,
+          postId,
+          type,
+        },
+      },
+    });
+
+    if (existing) {
+      await prisma.reaction.delete({
+        where: { id: existing.id },
+      });
+    } else {
+      await prisma.reaction.create({
+        data: {
+          postId,
+          userId,
+          type,
+        },
+      });
+    }
+
+    const reactions = await prisma.reaction.findMany({
+      where: { postId },
+      select: { type: true, userId: true },
+    });
+
+    const counts: Record<string, number> = { like: 0, love: 0, fire: 0, insightful: 0, bookmark: 0 };
+    reactions.forEach(r => {
+      if (r.type in counts) counts[r.type]++;
+    });
+
+    const userReactions = reactions.filter(r => r.userId === userId).map(r => r.type);
+
+    return {
+      success: true,
+      counts,
+      userReactions,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * PUBLIC action: Get post reactions summary.
+ */
+export async function getPostReactions(postId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    const userId = session?.user?.id || null;
+
+    const reactions = await prisma.reaction.findMany({
+      where: { postId },
+      select: { type: true, userId: true },
+    });
+
+    const counts: Record<string, number> = { like: 0, love: 0, fire: 0, insightful: 0, bookmark: 0 };
+    reactions.forEach(r => {
+      if (r.type in counts) counts[r.type]++;
+    });
+
+    const userReactions = userId
+      ? reactions.filter(r => r.userId === userId).map(r => r.type)
+      : [];
+
+    return {
+      success: true,
+      counts,
+      userReactions,
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * USER action: Get notifications list.
+ */
+export async function getNotificationsList() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+
+    const notifications = await prisma.notification.findMany({
+      where: { userId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    return {
+      success: true,
+      data: notifications.map(n => ({
+        id: n.id,
+        type: n.type,
+        entityId: n.entityId,
+        read: n.read,
+        createdAt: n.createdAt.toISOString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * USER action: Mark single notification as read.
+ */
+export async function markNotificationAsRead(id: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    await prisma.notification.update({
+      where: { id },
+      data: { read: true },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * USER action: Mark all notifications as read.
+ */
+export async function markAllNotificationsAsRead() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session || !session.user) {
+      throw new Error("Unauthorized");
+    }
+
+    const userId = session.user.id;
+
+    await prisma.notification.updateMany({
+      where: { userId, read: false },
+      data: { read: true },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

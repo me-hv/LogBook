@@ -13,6 +13,8 @@ import { RelatedPosts } from "@/components/RelatedPosts";
 import { SubscribeForm } from "@/components/SubscribeForm";
 import { extractHeadings } from "@/lib/markdown";
 import { recordPostView } from "@/services/analytics";
+import { ReactionBar } from "@/components/ReactionBar";
+import { CommentList } from "@/components/CommentList";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -128,6 +130,9 @@ export default async function BlogPostPage({ params }: PageProps) {
                   ))}
                 </div>
               )}
+
+              {/* Reactions Bar */}
+              <ReactionBar postId={post.id} />
             </article>
 
             {/* Author profile card */}
@@ -222,6 +227,11 @@ export default async function BlogPostPage({ params }: PageProps) {
 
         {/* Related Posts Section */}
         <RelatedPosts posts={relatedPosts} />
+
+        {/* Discussion / Comments Section */}
+        <div className="pt-10 border-t border-zinc-200 dark:border-zinc-800">
+          <CommentList postId={post.id} postAuthorId={post.author.id} />
+        </div>
       </div>
 
       <BackToTop />
