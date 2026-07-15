@@ -109,10 +109,16 @@ export function AdminSidebar() {
       active: pathname.startsWith("/admin/developers"),
     },
     {
-      name: "Plugins",
-      href: "/admin/plugins",
+      name: "App Marketplace",
+      href: "/admin/marketplace",
       icon: <Puzzle className="w-4 h-4" />,
-      active: pathname.startsWith("/admin/plugins"),
+      active: pathname.startsWith("/admin/marketplace"),
+    },
+    {
+      name: "Developer Console",
+      href: "/admin/developer-console",
+      icon: <Code className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/developer-console"),
     },
     {
       name: "SaaS Workspace",

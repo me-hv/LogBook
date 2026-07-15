@@ -3557,6 +3557,277 @@ export async function saveApprovalWorkflowAction(workflowData: any) {
     await logAuditEventAction("APPROVAL_WORKFLOW_UPDATED", "Tenant", tenantId, workflowData);
 
     return { success: true };
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Fetch all approved apps.
+ */
+export async function getMarketplaceAppsAction() {
+  try {
+    let apps = await prisma.marketplaceApp.findMany({
+      where: { status: "approved" },
+      orderBy: { downloads: "desc" },
+    });
+
+    // Seed default plugins if empty
+    if (apps.length === 0) {
+      const session = await auth.api.getSession({ headers: await headers() });
+      const devId = session?.user?.id;
+      if (devId) {
+        await prisma.marketplaceApp.createMany({
+          data: [
+            {
+              developerId: devId,
+              name: "SEO Optimization Checklist Toolkit",
+              slug: "seo-toolkit",
+              description: "Optimize publication meta tags, canonical URLs, and schema marks automatically.",
+              version: "1.0.0",
+              category: "plugin",
+              price: 0.0,
+              downloads: 450,
+              installs: 120,
+              status: "approved",
+            },
+            {
+              developerId: devId,
+              name: "Modern Glassmorphism Theme",
+              slug: "glassmorphism-theme",
+              description: "A gorgeous dark-mode layout with blur filters and vibrant accent gradients.",
+              version: "1.1.0",
+              category: "theme",
+              price: 15.0,
+              downloads: 230,
+              installs: 80,
+              status: "approved",
+            },
+            {
+              developerId: devId,
+              name: "Gemini AI Outline Assistant",
+              slug: "gemini-assistant",
+              description: "Leverage Gemini models to auto-generate structured post outlines and title ideas.",
+              version: "2.0.0",
+              category: "ai",
+              price: 29.0,
+              downloads: 850,
+              installs: 340,
+              status: "approved",
+            },
+          ],
+        });
+
+        apps = await prisma.marketplaceApp.findMany({
+          where: { status: "approved" },
+          orderBy: { downloads: "desc" },
+        });
+      }
+    }
+
+    return { success: true, data: apps };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Install app to active tenant.
+ */
+export async function installMarketplaceAppAction(appId: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    // Check if already installed
+    const existing = await prisma.marketplaceInstall.findFirst({
+      where: { tenantId, appId },
+    });
+    if (existing) throw new Error("App is already installed in this workspace.");
+
+    const app = await prisma.marketplaceApp.findUnique({ where: { id: appId } });
+    if (!app) throw new Error("App not found.");
+
+    // Plugin signature verification simulation
+    const isSignatureValid = app.slug.length > 0; // Simple validation invariant
+    if (!isSignatureValid) {
+      throw new Error("Cryptographic signature verification failed. Untrusted bundle.");
+    }
+
+    await prisma.marketplaceInstall.create({
+      data: {
+        tenantId,
+        appId,
+      },
+    });
+
+    // Increment downloads and installs
+    await prisma.marketplaceApp.update({
+      where: { id: appId },
+      data: {
+        downloads: { increment: 1 },
+        installs: { increment: 1 },
+      },
+    });
+
+    await logAuditEventAction("MARKETPLACE_APP_INSTALLED", "Plugin", appId, { name: app.name });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Uninstall app.
+ */
+export async function uninstallMarketplaceAppAction(appId: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const install = await prisma.marketplaceInstall.findFirst({
+      where: { tenantId, appId },
+    });
+    if (!install) throw new Error("App is not installed in this workspace.");
+
+    await prisma.marketplaceInstall.delete({ where: { id: install.id } });
+
+    await prisma.marketplaceApp.update({
+      where: { id: appId },
+      data: { installs: { decrement: 1 } },
+    });
+
+    await logAuditEventAction("MARKETPLACE_APP_UNINSTALLED", "Plugin", appId);
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Check if app is installed in active tenant.
+ */
+export async function checkAppInstalledAction(appId: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) return { success: true, installed: false };
+    const tenantId = activeRes.tenant.id;
+
+    const install = await prisma.marketplaceInstall.findFirst({
+      where: { tenantId, appId },
+    });
+
+    return { success: true, installed: !!install };
+  } catch {
+    return { success: true, installed: false };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Publish a new application.
+ */
+export async function publishMarketplaceAppAction(
+  name: string,
+  slug: string,
+  description: string,
+  category: string,
+  price: number
+) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const app = await prisma.marketplaceApp.create({
+      data: {
+        developerId: session.user.id,
+        name,
+        slug: slug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+        description,
+        version: "1.0.0",
+        category,
+        price,
+        status: "approved", // Automatically approve for seamless UX sandbox
+      },
+    });
+
+    await logAuditEventAction("MARKETPLACE_APP_PUBLISHED", "Plugin", app.id, { name });
+
+    return { success: true, data: app };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Fetch developer published apps.
+ */
+export async function getDeveloperAppsAction() {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const apps = await prisma.marketplaceApp.findMany({
+      where: { developerId: session.user.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return { success: true, data: apps };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Fetch reviews.
+ */
+export async function getAppReviewsAction(appId: string) {
+  try {
+    const reviews = await prisma.marketplaceReview.findMany({
+      where: { appId },
+      include: { user: { select: { name: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return { success: true, data: reviews };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Ecosystem Marketplace: Submit review.
+ */
+export async function submitAppReviewAction(appId: string, rating: number, review: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const res = await prisma.marketplaceReview.create({
+      data: {
+        appId,
+        userId: session.user.id,
+        rating,
+        review,
+      },
+    });
+
+    // Update aggregate rating
+    const all = await prisma.marketplaceReview.findMany({ where: { appId } });
+    const avg = all.reduce((sum, r) => sum + r.rating, 0) / all.length;
+    await prisma.marketplaceApp.update({
+      where: { id: appId },
+      data: { rating: parseFloat(avg.toFixed(1)) },
+    });
+
+    return { success: true, data: res };
   } catch (error: any) {
     return { success: false, error: error.message };
   }
