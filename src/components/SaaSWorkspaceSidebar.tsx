@@ -32,6 +32,12 @@ export function SaaSWorkspaceSidebar() {
       icon: <Globe className="w-4 h-4" />,
       active: pathname === "/dashboard/domains",
     },
+    {
+      name: "Security & Governance",
+      href: "/dashboard/security",
+      icon: <ShieldCheck className="w-4 h-4" />,
+      active: pathname === "/dashboard/security",
+    },
   ];
 
   return (

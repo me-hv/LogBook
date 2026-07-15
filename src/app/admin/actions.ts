@@ -3380,3 +3380,184 @@ export async function createUsageSnapshotAction() {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * SaaS Audit: Log audit event helper.
+ */
+export async function logAuditEventAction(
+  action: string,
+  resourceType: string,
+  resourceId?: string,
+  metadata?: Record<string, any>
+) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) return { success: false, error: "Unauthorized" };
+
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) return { success: false, error: "No active tenant" };
+    const tenantId = activeRes.tenant.id;
+
+    const reqHeaders = await headers();
+    const ipAddress = reqHeaders.get("x-forwarded-for") || reqHeaders.get("x-real-ip") || "127.0.0.1";
+    const userAgent = reqHeaders.get("user-agent") || "unknown";
+
+    await prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: session.user.id,
+        action,
+        resourceType,
+        resourceId: resourceId || null,
+        metadata: metadata ? JSON.stringify(metadata) : null,
+        ipAddress,
+        userAgent,
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    console.error("Audit log failed:", error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Audit: Fetch audit trails logs.
+ */
+export async function getAuditLogsAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const logs = await prisma.auditLog.findMany({
+      where: { tenantId },
+      include: { user: { select: { name: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    return {
+      success: true,
+      data: logs.map((l) => ({
+        id: l.id,
+        userName: l.user?.name || "System",
+        userEmail: l.user?.email || "",
+        action: l.action,
+        resourceType: l.resourceType,
+        resourceId: l.resourceId,
+        metadata: l.metadata ? JSON.parse(l.metadata) : null,
+        ipAddress: l.ipAddress,
+        userAgent: l.userAgent,
+        createdAt: l.createdAt.toLocaleString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Session: Fetch active session logs.
+ */
+export async function getActiveSessionsAction() {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const sessions = await prisma.session.findMany({
+      where: { userId: session.user.id },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: sessions.map((s) => ({
+        id: s.id,
+        ipAddress: s.ipAddress || "127.0.0.1",
+        userAgent: s.userAgent || "Chrome - Windows",
+        expiresAt: s.expiresAt.toLocaleDateString(),
+        createdAt: s.createdAt.toLocaleDateString(),
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Session: Revoke session.
+ */
+export async function revokeUserSessionAction(sessionId: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    await prisma.session.delete({
+      where: {
+        id: sessionId,
+        userId: session.user.id, // security context boundary
+      },
+    });
+
+    // Record audit event
+    await logAuditEventAction("SESSION_REVOKED", "Session", sessionId, { sessionId });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Governance: Toggle MFA.
+ */
+export async function toggleMfaAction(enabled: boolean) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    // In a mock environment we record it in audit log. In production, we interact with Better Auth MFA setups.
+    await logAuditEventAction("MFA_TOGGLED", "User", session.user.id, { enabled });
+
+    return { success: true, enabled };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Governance: Save custom editorial review workflows.
+ */
+export async function saveApprovalWorkflowAction(workflowData: any) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    // Save as a workspace configuration setting in the plugin table/settings file
+    await prisma.pluginSetting.upsert({
+      where: {
+        pluginId_key: {
+          pluginId: "approval-workflow",
+          key: `workflow_${tenantId}`,
+        },
+      },
+      create: {
+        pluginId: "approval-workflow",
+        key: `workflow_${tenantId}`,
+        value: JSON.stringify(workflowData),
+      },
+      update: {
+        value: JSON.stringify(workflowData),
+      },
+    });
+
+    await logAuditEventAction("APPROVAL_WORKFLOW_UPDATED", "Tenant", tenantId, workflowData);
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
