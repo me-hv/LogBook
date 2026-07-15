@@ -3832,3 +3832,186 @@ export async function submitAppReviewAction(appId: string, rating: number, revie
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Enterprise Branding: Fetch active tenant branding settings.
+ */
+export async function getTenantBrandingAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    let branding = await prisma.tenantBranding.findUnique({
+      where: { tenantId },
+    });
+
+    if (!branding) {
+      branding = await prisma.tenantBranding.create({
+        data: {
+          tenantId,
+          appName: activeRes.tenant.name,
+          primaryColor: "#18181b",
+          secondaryColor: "#71717a",
+          fontFamily: "Inter",
+        },
+      });
+    }
+
+    return { success: true, data: branding };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enterprise Branding: Update tenant branding configuration.
+ */
+export async function saveTenantBrandingAction(brandingData: {
+  appName: string;
+  logoUrl?: string;
+  faviconUrl?: string;
+  primaryColor: string;
+  secondaryColor: string;
+  fontFamily: string;
+  customCss?: string;
+}) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const res = await prisma.tenantBranding.upsert({
+      where: { tenantId },
+      create: {
+        tenantId,
+        ...brandingData,
+      },
+      update: brandingData,
+    });
+
+    await logAuditEventAction("BRANDING_SETTINGS_UPDATED", "Tenant", tenantId, brandingData);
+
+    return { success: true, data: res };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enterprise Domains: Fetch tenant custom domains list.
+ */
+export async function getTenantDomainsAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const domains = await prisma.tenantDomain.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+    });
+
+    return { success: true, data: domains };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enterprise Domains: Add a custom domain.
+ */
+export async function addTenantDomainAction(domain: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const cleanDomain = domain.toLowerCase().trim().replace(/https?:\/\//, "");
+    if (!cleanDomain) throw new Error("Domain cannot be empty.");
+
+    const existing = await prisma.tenantDomain.findUnique({
+      where: { domain: cleanDomain },
+    });
+    if (existing) throw new Error("This custom domain is already registered on another workspace.");
+
+    const res = await prisma.tenantDomain.create({
+      data: {
+        tenantId,
+        domain: cleanDomain,
+        verified: false,
+        sslEnabled: false,
+      },
+    });
+
+    await logAuditEventAction("CUSTOM_DOMAIN_ADDED", "Domain", res.id, { domain: cleanDomain });
+
+    return { success: true, data: res };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enterprise Domains: Verify custom domain (simulated check).
+ */
+export async function verifyTenantDomainAction(domainId: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+
+    const domain = await prisma.tenantDomain.findUnique({ where: { id: domainId } });
+    if (!domain) throw new Error("Domain mapping not found.");
+
+    // Simulate SSL + TXT verification checks
+    const updated = await prisma.tenantDomain.update({
+      where: { id: domainId },
+      data: {
+        verified: true,
+        sslEnabled: true,
+      },
+    });
+
+    // Sync domain back to tenant settings if verified
+    await prisma.tenant.update({
+      where: { id: domain.tenantId },
+      data: { customDomain: domain.domain },
+    });
+
+    await logAuditEventAction("CUSTOM_DOMAIN_VERIFIED", "Domain", domainId, { domain: domain.domain });
+
+    return { success: true, data: updated };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Enterprise Domains: Delete custom domain mapping.
+ */
+export async function deleteTenantDomainAction(domainId: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const domain = await prisma.tenantDomain.findUnique({ where: { id: domainId } });
+    if (!domain) throw new Error("Domain mapping not found.");
+
+    await prisma.tenantDomain.delete({ where: { id: domainId } });
+
+    // Clear main custom domain setting on Tenant if matched
+    if (activeRes.tenant.customDomain === domain.domain) {
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { customDomain: null },
+      });
+    }
+
+    await logAuditEventAction("CUSTOM_DOMAIN_DELETED", "Domain", domainId, { domain: domain.domain });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

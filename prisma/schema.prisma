@@ -400,6 +400,8 @@ model Tenant {
   usageSnapshots               UsageSnapshot[]
   auditLogs                    AuditLog[]
   marketplaceInstalls          MarketplaceInstall[]
+  branding                     TenantBranding?
+  domains                      TenantDomain[]
   createdAt                    DateTime         @default(now())
   updatedAt                    DateTime         @updatedAt
 }
@@ -517,6 +519,33 @@ model MarketplaceInstall {
 
   @@index([tenantId])
   @@index([appId])
+}
+
+model TenantBranding {
+  id             String   @id @default(cuid())
+  tenantId       String   @unique
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  appName        String   @default("LogBook")
+  logoUrl        String?
+  faviconUrl     String?
+  primaryColor   String   @default("#18181b")
+  secondaryColor String   @default("#71717a")
+  fontFamily     String   @default("Inter")
+  customCss      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model TenantDomain {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  domain      String   @unique
+  verified    Boolean  @default(false)
+  sslEnabled  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId])
 }
 
 
