@@ -4015,3 +4015,170 @@ export async function deleteTenantDomainAction(domainId: string) {
     return { success: false, error: error.message };
   }
 }
+
+/**
+ * Autonomous AI Agent: Create a new background AI Job.
+ */
+export async function createAiAgentJobAction(type: string, input: string) {
+  try {
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const job = await prisma.aIJob.create({
+      data: {
+        tenantId,
+        userId: session.user.id,
+        type,
+        input,
+        status: "queued",
+        tokensUsed: 0,
+      },
+    });
+
+    await logAuditEventAction("AI_AGENT_JOB_QUEUED", "AIJob", job.id, { type });
+
+    return { success: true, data: job };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Autonomous AI Agent: Fetch all AI Jobs for active tenant.
+ */
+export async function getAiAgentJobsAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) throw new Error("No active tenant");
+    const tenantId = activeRes.tenant.id;
+
+    const jobs = await prisma.aIJob.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    return { success: true, data: jobs };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Autonomous AI Agent: Simulate executing a queued background job.
+ */
+export async function simulateAiAgentRunAction(jobId: string) {
+  try {
+    const job = await prisma.aIJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new Error("Job not found.");
+
+    await prisma.aIJob.update({
+      where: { id: jobId },
+      data: { status: "running" },
+    });
+
+    // Simulate model inference latency
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    let output = "";
+    let tokens = 350;
+
+    if (job.type === "editorial") {
+      output = JSON.stringify({
+        topics: [
+          "10 next-generation Next.js 16 layouts architecture design guides",
+          "Advanced prisma.config performance indices optimizations on PlanetScale datasets",
+          "How to configure SPF, DKIM, and DMARC parameters for custom domain newsletter emails",
+        ],
+        outlines: "### Title: Next.js Layouts Guide\n1. Introduction to Edge routes\n2. Caching strategies\n3. Layout benchmarks",
+        gaps: "Lack of articles explaining CDN Edge caching options. Add a new tutorial about caching header directives.",
+      });
+      tokens = 450;
+    } else if (job.type === "seo") {
+      output = JSON.stringify({
+        title: "Planet-Scale deployments Guide — LogBook CMS",
+        description: "Configure multi-region read replica setups, edge CDNs caching, and request latency optimizations in under 100ms.",
+        keywords: "CDN caching, Next.js edge runtime, multi-region replication, SQL query metrics",
+      });
+      tokens = 280;
+    } else if (job.type === "review") {
+      output = JSON.stringify({
+        grammar: "Zero structural typos detected. Readability index is 85% (Flesch-Kincaid easy read scale).",
+        tone: "Professional, technical, authoritative. Matches enterprise workspace voice parameters.",
+      });
+      tokens = 310;
+    } else if (job.type === "publish") {
+      output = JSON.stringify({
+        recommendTime: "Thursday, 2:00 PM EST (Historically highest subscriber click-through rate)",
+        socialPosts: "Check out our latest publication white-label branding guide! Learn how to configure custom DNS records: logbook.com/brand",
+        summary: "A brief guide describing white-label parameters, logos, color selectors, and custom DNS verifications.",
+      });
+      tokens = 390;
+    } else {
+      output = "AI suggestion compiled successfully.";
+    }
+
+    const updated = await prisma.aIJob.update({
+      where: { id: jobId },
+      data: {
+        status: "completed",
+        output,
+        tokensUsed: tokens,
+        completedAt: new Date(),
+      },
+    });
+
+    await logAuditEventAction("AI_AGENT_JOB_COMPLETED", "AIJob", jobId, { type: job.type, tokens });
+
+    return { success: true, data: updated };
+  } catch (error: any) {
+    await prisma.aIJob.update({
+      where: { id: jobId },
+      data: { status: "failed" },
+    });
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Autonomous AI Agent: Human-in-the-loop approval confirmation.
+ */
+export async function approveAiSuggestionAction(jobId: string) {
+  try {
+    const job = await prisma.aIJob.findUnique({ where: { id: jobId } });
+    if (!job || !job.output) throw new Error("Job or output suggestions not found.");
+
+    // Simulate human approval workflow:
+    // If editorial, we parse the suggest outline and create a new draft Post!
+    if (job.type === "editorial") {
+      const data = JSON.parse(job.output);
+      const activeRes = await getActiveTenantAction();
+      if (activeRes.success && activeRes.tenant) {
+        // Create draft post from AI suggestion
+        await prisma.post.create({
+          data: {
+            tenantId: activeRes.tenant.id,
+            title: data.topics[0],
+            slug: `ai-suggested-${Date.now()}`,
+            content: data.outlines,
+            status: "draft",
+            authorId: job.userId,
+          },
+        });
+      }
+    }
+
+    // Mark job archived / completed approval
+    await prisma.aIJob.delete({ where: { id: jobId } });
+
+    await logAuditEventAction("AI_SUGGESTION_APPROVED", "AIJob", jobId, { type: job.type });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}

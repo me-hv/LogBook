@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Settings, Users, CreditCard, Globe, ArrowLeft, BookOpen, ShieldCheck, Palette } from "lucide-react";
+import { Settings, Users, CreditCard, Globe, ArrowLeft, BookOpen, ShieldCheck, Palette, Sparkles } from "lucide-react";
 
 export function SaaSWorkspaceSidebar() {
   const pathname = usePathname();
@@ -43,6 +43,12 @@ export function SaaSWorkspaceSidebar() {
       href: "/dashboard/security",
       icon: <ShieldCheck className="w-4 h-4" />,
       active: pathname === "/dashboard/security",
+    },
+    {
+      name: "Autonomous AI Agents",
+      href: "/dashboard/ai",
+      icon: <Sparkles className="w-4 h-4" />,
+      active: pathname === "/dashboard/ai",
     },
   ];
 
