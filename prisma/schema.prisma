@@ -36,6 +36,7 @@ model User {
   webhooks        Webhook[]
   tenantMembers   TenantMember[]
   auditLogs       AuditLog[]
+  devices         Device[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -228,7 +229,9 @@ model Reaction {
 
 model Notification {
   id        String   @id @default(cuid())
-  type      String   // "comment" | "reply"
+  type      String   // "comment" | "reply" | "system"
+  title     String?
+  body      String?
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   entityId  String   // ID of the triggering comment / post
@@ -451,6 +454,18 @@ model AuditLog {
   createdAt    DateTime @default(now())
 
   @@index([tenantId])
+  @@index([userId])
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform   String   // "ios" | "android"
+  deviceName String
+  pushToken  String   @unique
+  lastSeenAt DateTime @default(now())
+
   @@index([userId])
 }
 
