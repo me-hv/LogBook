@@ -34,6 +34,7 @@ model User {
   aiJobs          AIJob[]
   apiKeys         ApiKey[]
   webhooks        Webhook[]
+  tenantMembers   TenantMember[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -66,6 +67,8 @@ model Post {
   reactions     Reaction[]
   revisions     PostRevision[]
   editorialNotes EditorialNote[]
+  tenantId      String?
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }
@@ -76,6 +79,8 @@ model Category {
   slug        String   @unique
   description String?
   posts       Post[]
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -85,6 +90,8 @@ model Tag {
   name      String    @unique
   slug      String    @unique
   posts     PostTag[]
+  tenantId  String?
+  tenant    Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
@@ -146,6 +153,8 @@ model Media {
   mimeType     String
   uploadedById String
   uploadedBy   User     @relation(fields: [uploadedById], references: [id], onDelete: Cascade)
+  tenantId     String?
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
 }
 
@@ -179,6 +188,8 @@ model Subscriber {
   subscribedAt     DateTime  @default(now())
   unsubscribedAt   DateTime?
   source           String    @default("unknown")
+  tenantId         String?
+  tenant           Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model Comment {
@@ -232,6 +243,8 @@ model Invitation {
   role      String   @default("author")
   token     String   @unique
   expiresAt DateTime
+  tenantId  String?
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
 }
 
@@ -295,6 +308,8 @@ model ApiKey {
   expiresAt   DateTime?
   createdById String
   createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt   DateTime  @default(now())
 
   @@index([createdById])
@@ -308,6 +323,8 @@ model Webhook {
   active      Boolean   @default(true)
   createdById String
   createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt   DateTime  @default(now())
 
   @@index([createdById])
@@ -332,6 +349,89 @@ model PluginSetting {
 
   @@unique([pluginId, key])
   @@index([pluginId])
+}
+
+enum SubscriptionPlan {
+  FREE
+  STARTER
+  PRO
+  BUSINESS
+  ENTERPRISE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Tenant {
+  id                           String           @id @default(cuid())
+  name                         String
+  slug                         String           @unique // subdomain slug, e.g. "acme"
+  logo                         String?
+  customDomain                 String?          @unique
+  plan                         SubscriptionPlan @default(FREE)
+  stripeCustomerId             String?          @unique
+  stripeSubscriptionId         String?          @unique
+  stripePriceId                String?
+  subscriptionStatus           String?
+  subscriptionCurrentPeriodEnd DateTime?
+  trialEndsAt                  DateTime?
+  ownerId                      String
+  members                      TenantMember[]
+  posts                        Post[]
+  categories                   Category[]
+  tags                         Tag[]
+  media                        Media[]
+  subscribers                  Subscriber[]
+  apiKeys                      ApiKey[]
+  webhooks                     Webhook[]
+  invitations                  Invitation[]
+  invoices                     Invoice[]
+  usageSnapshots               UsageSnapshot[]
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
+}
+
+model TenantMember {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String   @default("author") // "owner" | "admin" | "editor" | "author" | "contributor"
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  tenantId        String
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  amount          Int           // in cents
+  currency        String        @default("usd")
+  status          InvoiceStatus @default(OPEN)
+  stripeInvoiceId String?       @unique
+  issuedAt        DateTime      @default(now())
+  paidAt          DateTime?
+}
+
+model UsageSnapshot {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  postsCount    Int
+  storageUsedMb Int
+  usersCount    Int
+  apiRequests   Int
+  aiTokensUsed  Int
+  createdAt     DateTime @default(now())
 }
 
 

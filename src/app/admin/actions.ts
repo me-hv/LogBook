@@ -2,7 +2,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import { auth } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
@@ -13,6 +13,7 @@ import { resend } from "@/lib/resend";
 import { dispatchWebhookEvent, dispatchThirdPartyAnnouncements } from "@/lib/webhooks";
 import { PLUGINS_REGISTRY } from "@/lib/plugins-registry";
 import { triggerPluginHook } from "@/lib/plugin-hooks";
+import { canCreatePost, canInviteUser, canUploadMedia, canUseAI, canAddCustomDomain } from "@/lib/billing";
 
 // Helper path for settings
 const settingsFilePath = path.join(process.cwd(), "src/lib/settings.json");
@@ -93,11 +94,20 @@ export async function createPost(data: {
 
     const { tagIds, categoryId, ...postData } = data;
 
+    const activeRes = await getActiveTenantAction();
+    const tenantId = activeRes.success && activeRes.tenant ? activeRes.tenant.id : null;
+
+    if (tenantId) {
+      const allowed = await canCreatePost(tenantId);
+      if (!allowed) throw new Error("Plan limit reached. Upgrade to add more publications.");
+    }
+
     const post = await prisma.post.create({
       data: {
         ...postData,
         categoryId: categoryId || null,
         authorId: session.user.id,
+        tenantId,
       },
     });
 
@@ -270,8 +280,14 @@ export async function updatePost(
 // Category Actions
 export async function createCategory(data: { name: string; slug: string; description?: string }) {
   try {
+    const activeRes = await getActiveTenantAction();
+    const tenantId = activeRes.success && activeRes.tenant ? activeRes.tenant.id : null;
+
     const category = await prisma.category.create({
-      data,
+      data: {
+        ...data,
+        tenantId,
+      },
     });
     revalidatePath("/admin/categories");
     revalidatePath("/admin/posts/new");
@@ -309,8 +325,14 @@ export async function deleteCategory(id: string) {
 // Tag Actions
 export async function createTag(data: { name: string; slug: string }) {
   try {
+    const activeRes = await getActiveTenantAction();
+    const tenantId = activeRes.success && activeRes.tenant ? activeRes.tenant.id : null;
+
     const tag = await prisma.tag.create({
-      data,
+      data: {
+        ...data,
+        tenantId,
+      },
     });
     revalidatePath("/admin/tags");
     revalidatePath("/admin/posts/new");
@@ -351,7 +373,10 @@ export async function getMediaList(search?: string) {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session || !session.user) return [];
 
-    const where: any = {};
+    const activeRes = await getActiveTenantAction();
+    const tenantId = activeRes.success && activeRes.tenant ? activeRes.tenant.id : undefined;
+
+    const where: any = { tenantId };
     if (search) {
       where.OR = [
         { filename: { contains: search, mode: "insensitive" } },
@@ -421,6 +446,14 @@ export async function uploadMediaAction(formData: FormData) {
     const { data: urlData } = supabaseAdmin.storage.from(bucket).getPublicUrl(filename);
     const publicUrl = urlData.publicUrl;
 
+    const activeRes = await getActiveTenantAction();
+    const tenantId = activeRes.success && activeRes.tenant ? activeRes.tenant.id : null;
+
+    if (tenantId) {
+      const allowed = await canUploadMedia(tenantId, file.size);
+      if (!allowed) throw new Error("Plan limit reached. Upgrade to increase storage capacity.");
+    }
+
     const media = await prisma.media.create({
       data: {
         filename,
@@ -429,6 +462,7 @@ export async function uploadMediaAction(formData: FormData) {
         size: file.size,
         mimeType: file.type,
         uploadedById: session.user.id,
+        tenantId,
       },
     });
 
@@ -2801,6 +2835,547 @@ export async function uninstallPluginAction(id: string) {
     await prisma.plugin.delete({ where: { id } });
 
     return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Get active workspace.
+ */
+export async function getActiveTenantAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+    if (!session || !session.user) return { success: false, error: "Unauthorized" };
+
+    const userId = session.user.id;
+    const cookieStore = await cookies();
+    let tenantId = cookieStore.get("logbook_active_tenant")?.value;
+
+    let tenant = null;
+    if (tenantId) {
+      tenant = await prisma.tenant.findFirst({
+        where: {
+          id: tenantId,
+          members: { some: { userId } },
+        },
+      });
+    }
+
+    if (!tenant) {
+      const membership = await prisma.tenantMember.findFirst({
+        where: { userId },
+        include: { tenant: true },
+      });
+
+      if (membership) {
+        tenant = membership.tenant;
+      }
+    }
+
+    if (!tenant) {
+      // Auto-create default Personal Workspace
+      tenant = await prisma.tenant.create({
+        data: {
+          name: "Personal Workspace",
+          slug: `personal-${userId.substring(0, 5).toLowerCase()}`,
+          plan: "FREE",
+          ownerId: userId,
+        },
+      });
+
+      await prisma.tenantMember.create({
+        data: {
+          tenantId: tenant.id,
+          userId,
+          role: "owner",
+        },
+      });
+    }
+
+    cookieStore.set("logbook_active_tenant", tenant.id, {
+      path: "/",
+      httpOnly: true,
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    return { success: true, tenant };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Switch workspace.
+ */
+export async function switchActiveTenantAction(tenantId: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+    if (!session || !session.user) return { success: false, error: "Unauthorized" };
+
+    const member = await prisma.tenantMember.findFirst({
+      where: {
+        tenantId,
+        userId: session.user.id,
+      },
+    });
+
+    if (!member) throw new Error("Workspace not found or access denied.");
+
+    const cookieStore = await cookies();
+    cookieStore.set("logbook_active_tenant", tenantId, {
+      path: "/",
+      httpOnly: true,
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Get all workspaces for the logged in user.
+ */
+export async function getTenantsListAction() {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+    if (!session || !session.user) return { success: false, error: "Unauthorized" };
+
+    const memberships = await prisma.tenantMember.findMany({
+      where: { userId: session.user.id },
+      include: { tenant: true },
+    });
+
+    return {
+      success: true,
+      data: memberships.map((m) => ({
+        id: m.tenant.id,
+        name: m.tenant.name,
+        slug: m.tenant.slug,
+        plan: m.tenant.plan,
+        role: m.role,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Create a new workspace.
+ */
+export async function createTenantAction(name: string, slug: string) {
+  try {
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+    if (!session || !session.user) return { success: false, error: "Unauthorized" };
+
+    // Unique slug check
+    const existing = await prisma.tenant.findUnique({ where: { slug } });
+    if (existing) throw new Error("Subdomain slug already in use.");
+
+    const tenant = await prisma.tenant.create({
+      data: {
+        name,
+        slug: slug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+        plan: "FREE",
+        ownerId: session.user.id,
+      },
+    });
+
+    await prisma.tenantMember.create({
+      data: {
+        tenantId: tenant.id,
+        userId: session.user.id,
+        role: "owner",
+      },
+    });
+
+    const cookieStore = await cookies();
+    cookieStore.set("logbook_active_tenant", tenant.id, {
+      path: "/",
+      httpOnly: true,
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    return { success: true, tenant };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Get usage stats.
+ */
+export async function getTenantUsageStatsAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const [posts, members, subscribers] = await Promise.all([
+      prisma.post.count({ where: { tenantId } }),
+      prisma.tenantMember.count({ where: { tenantId } }),
+      prisma.subscriber.count({ where: { tenantId } }),
+    ]);
+
+    // Hardcode plan limits
+    const limits = {
+      free: { posts: 100, storage: "1 GB", members: 3 },
+      pro: { posts: 999999, storage: "50 GB", members: 10 },
+      business: { posts: 999999, storage: "Unlimited", members: 999999 },
+    };
+
+    const currentPlan = (activeRes.tenant.plan || "free") as "free" | "pro" | "business";
+    const currentLimit = limits[currentPlan] || limits.free;
+
+    return {
+      success: true,
+      data: {
+        plan: currentPlan,
+        usage: { posts, members, subscribers },
+        limits: currentLimit,
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Update Settings.
+ */
+export async function updateTenantSettingsAction(data: { name: string; slug: string; logo?: string; customDomain?: string }) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    if (data.customDomain && data.customDomain !== activeRes.tenant.customDomain) {
+      const allowed = await canAddCustomDomain(tenantId);
+      if (!allowed) throw new Error("Plan limit reached. Upgrade to link custom domains.");
+    }
+
+    const updated = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        name: data.name,
+        slug: data.slug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
+        logo: data.logo || null,
+        customDomain: data.customDomain || null,
+      },
+    });
+
+    return { success: true, tenant: updated };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Get members list.
+ */
+export async function getTenantMembersListAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const members = await prisma.tenantMember.findMany({
+      where: { tenantId },
+      include: { user: { select: { id: true, name: true, email: true, image: true } } },
+    });
+
+    const invitations = await prisma.invitation.findMany({
+      where: { tenantId },
+    });
+
+    return {
+      success: true,
+      data: {
+        members: members.map((m) => ({
+          id: m.id,
+          userId: m.userId,
+          name: m.user.name,
+          email: m.user.email,
+          image: m.user.image,
+          role: m.role,
+        })),
+        invitations: invitations.map((i) => ({
+          id: i.id,
+          email: i.email,
+          role: i.role,
+          expiresAt: i.expiresAt.toISOString(),
+        })),
+      },
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Invite member.
+ */
+export async function inviteTenantMemberAction(email: string, role: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const allowed = await canInviteUser(tenantId);
+    if (!allowed) throw new Error("Plan limit reached. Upgrade to invite more team collaborators.");
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      // Create direct membership
+      await prisma.tenantMember.upsert({
+        where: {
+          tenantId_userId: {
+            tenantId,
+            userId: user.id,
+          },
+        },
+        create: {
+          tenantId,
+          userId: user.id,
+          role,
+        },
+        update: {
+          role,
+        },
+      });
+    } else {
+      // Create invitation entry
+      await prisma.invitation.create({
+        data: {
+          email,
+          role,
+          token: randomUUID(),
+          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          tenantId,
+        },
+      });
+    }
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Remove member.
+ */
+export async function removeTenantMemberAction(memberId: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    await prisma.tenantMember.delete({
+      where: {
+        id: memberId,
+        tenantId, // check security boundary
+      },
+    });
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS Multi-Tenant: Update subscriber growth values.
+ */
+export async function updateTenantPlanAction(plan: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error(activeRes.error || "Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const updated = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { plan: plan.toUpperCase() as any },
+    });
+
+    return { success: true, plan: updated.plan };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Stripe: Create checkout session action.
+ */
+import { createCheckoutSession, createPortalSession, STRIPE_PRICES } from "@/lib/stripe";
+
+export async function createStripeCheckoutSessionAction(planName: string) {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error("Failed to resolve active tenant");
+    }
+    const tenant = activeRes.tenant;
+    const session = await auth.api.getSession({ headers: await headers() });
+    if (!session || !session.user) throw new Error("Unauthorized");
+
+    const priceId = STRIPE_PRICES[planName.toUpperCase()] || STRIPE_PRICES.FREE;
+    const origin = (await headers()).get("origin") || "http://localhost:3000";
+
+    const stripeSession = await createCheckoutSession({
+      tenantId: tenant.id,
+      email: session.user.email,
+      planName,
+      priceId,
+      successUrl: `${origin}/dashboard/billing`,
+      cancelUrl: `${origin}/dashboard/billing`,
+    });
+
+    // In mock mode, we immediately update the database to simulate completed checkout!
+    if (!process.env.STRIPE_SECRET_KEY) {
+      await prisma.tenant.update({
+        where: { id: tenant.id },
+        data: {
+          plan: planName.toUpperCase() as any,
+          stripeCustomerId: `mock_cus_${tenant.id}`,
+          stripeSubscriptionId: `mock_sub_${Date.now()}`,
+          stripePriceId: priceId,
+          subscriptionStatus: "active",
+          subscriptionCurrentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        },
+      });
+
+      // Create paid invoice entry
+      await prisma.invoice.create({
+        data: {
+          tenantId: tenant.id,
+          amount: planName.toUpperCase() === "STARTER" ? 900 : planName.toUpperCase() === "PRO" ? 2900 : planName.toUpperCase() === "BUSINESS" ? 9900 : 0,
+          status: "PAID",
+          stripeInvoiceId: `mock_inv_${Date.now()}`,
+          paidAt: new Date(),
+        },
+      });
+    }
+
+    return { success: true, url: stripeSession.url };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Stripe: Create Customer Portal session action.
+ */
+export async function createStripePortalSessionAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error("Failed to resolve active tenant");
+    }
+    const tenant = activeRes.tenant;
+
+    const customerId = tenant.stripeCustomerId || `mock_cus_${tenant.id}`;
+    const origin = (await headers()).get("origin") || "http://localhost:3000";
+
+    const portalSession = await createPortalSession(customerId, `${origin}/dashboard/billing`);
+
+    return { success: true, url: portalSession.url };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Stripe: Retrieve invoice billing history.
+ */
+export async function getInvoiceHistoryAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error("Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const invoices = await prisma.invoice.findMany({
+      where: { tenantId },
+      orderBy: { issuedAt: "desc" },
+    });
+
+    return {
+      success: true,
+      data: invoices.map((inv) => ({
+        id: inv.id,
+        amount: (inv.amount / 100).toFixed(2),
+        currency: inv.currency.toUpperCase(),
+        status: inv.status,
+        stripeInvoiceId: inv.stripeInvoiceId,
+        issuedAt: inv.issuedAt.toLocaleDateString(),
+        paidAt: inv.paidAt ? inv.paidAt.toLocaleDateString() : null,
+      })),
+    };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * SaaS: Update/save usage snapshots.
+ */
+export async function createUsageSnapshotAction() {
+  try {
+    const activeRes = await getActiveTenantAction();
+    if (!activeRes.success || !activeRes.tenant) {
+      throw new Error("Failed to resolve active tenant");
+    }
+    const tenantId = activeRes.tenant.id;
+
+    const [posts, members, media] = await Promise.all([
+      prisma.post.count({ where: { tenantId } }),
+      prisma.tenantMember.count({ where: { tenantId } }),
+      prisma.media.aggregate({
+        where: { tenantId },
+        _sum: { size: true },
+      }),
+    ]);
+
+    const storageMb = Math.round((media._sum.size || 0) / (1024 * 1024));
+
+    const snapshot = await prisma.usageSnapshot.create({
+      data: {
+        tenantId,
+        postsCount: posts,
+        usersCount: members,
+        storageUsedMb: storageMb,
+        apiRequests: 0,
+        aiTokensUsed: 0,
+      },
+    });
+
+    return { success: true, data: snapshot };
   } catch (error: any) {
     return { success: false, error: error.message };
   }

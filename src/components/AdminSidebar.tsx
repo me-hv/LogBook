@@ -20,6 +20,7 @@ import {
   Puzzle,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
+import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 
 export function AdminSidebar() {
   const pathname = usePathname();
@@ -78,16 +79,16 @@ export function AdminSidebar() {
       active: pathname.startsWith("/admin/analytics"),
     },
     {
+      name: "Subscribers",
+      href: "/admin/subscribers",
+      icon: <Users className="w-4 h-4" />,
+      active: pathname.startsWith("/admin/subscribers"),
+    },
+    {
       name: "Newsletter",
       href: "/admin/newsletter",
       icon: <Mail className="w-4 h-4" />,
       active: pathname.startsWith("/admin/newsletter"),
-    },
-    {
-      name: "Subscribers",
-      href: "/admin/subscribers",
-      icon: <UserCheck className="w-4 h-4" />,
-      active: pathname.startsWith("/admin/subscribers"),
     },
     {
       name: "Comments",
@@ -98,7 +99,7 @@ export function AdminSidebar() {
     {
       name: "Team Collaboration",
       href: "/admin/users",
-      icon: <Users className="w-4 h-4" />,
+      icon: <UserCheck className="w-4 h-4" />,
       active: pathname.startsWith("/admin/users"),
     },
     {
@@ -114,10 +115,10 @@ export function AdminSidebar() {
       active: pathname.startsWith("/admin/plugins"),
     },
     {
-      name: "Settings",
-      href: "/admin/settings",
+      name: "SaaS Workspace",
+      href: "/dashboard/settings",
       icon: <Settings className="w-4 h-4" />,
-      active: pathname.startsWith("/admin/settings"),
+      active: pathname.startsWith("/dashboard"),
     },
   ];
 
@@ -125,10 +126,15 @@ export function AdminSidebar() {
     <aside className="w-full md:w-64 flex-shrink-0 bg-white dark:bg-black border-b md:border-b-0 md:border-r border-zinc-200 dark:border-zinc-800 p-6 flex flex-col justify-between transition-colors">
       <div className="space-y-6">
         {/* Brand */}
-        <Link href="/" className="flex items-center gap-2 px-2 text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          <BookOpen className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
-          <span>LogBook</span>
-        </Link>
+        <div className="space-y-4">
+          <Link href="/" className="flex items-center gap-2 px-2 text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-550">
+            <BookOpen className="w-6 h-6 text-zinc-900 dark:text-zinc-50" />
+            <span>LogBook</span>
+          </Link>
+          <div className="px-2">
+            <WorkspaceSwitcher />
+          </div>
+        </div>
 
         {/* Nav Links */}
         <nav className="space-y-1">

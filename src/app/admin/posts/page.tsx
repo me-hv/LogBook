@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
+import { getActiveTenantId } from "@/lib/tenant-helper";
 import { PostsManager } from "./PostsManager";
 
 export default async function AdminPostsPage() {
+  const tenantId = await getActiveTenantId();
   const posts = await prisma.post.findMany({
+    where: { tenantId },
     orderBy: { createdAt: "desc" },
     include: {
       category: true,

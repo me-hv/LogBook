@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
+import { getActiveTenantId } from "@/lib/tenant-helper";
 import { TagsManager } from "./TagsManager";
 
 export default async function AdminTagsPage() {
+  const tenantId = await getActiveTenantId();
   const tags = await prisma.tag.findMany({
+    where: { tenantId },
     orderBy: { name: "asc" },
   });
 
